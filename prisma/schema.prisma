@@ -10,6 +10,7 @@ enum SourceType { UPLOAD URL YOUTUBE TWITCH KICK GOOGLE_DRIVE }
 enum ClipStatus { CANDIDATE SELECTED EDITING RENDERING READY FAILED REJECTED }
 enum RenderStatus { QUEUED PROCESSING READY FAILED }
 enum PublishStatus { DRAFT SCHEDULED PUBLISHING PUBLISHED FAILED CANCELLED }
+enum FeedbackEvent { ACCEPT REJECT EDIT EXPORT PUBLISH }
 
 model User {
   id String @id @default(cuid())
@@ -20,8 +21,16 @@ model User {
   updatedAt DateTime @updatedAt
   projects Project[]
   jobs Job[]
+  sources Source[]
   subscription Subscription?
   usage Usage?
+  socialConnections SocialConnection[]
+  scheduledPosts ScheduledPost[]
+  analytics AnalyticsRecord[]
+  favorites Favorite[]
+  templates Template[]
+  notifications Notification[]
+  events CreatorEvent[]
 }
 model Subscription {
   id String @id @default(cuid())
@@ -85,6 +94,8 @@ model Project {
   jobs Job[]
   analyses Analysis[]
   clips Clip[]
+  favorites Favorite[]
+  events CreatorEvent[]
 }
 model Job {
   id String @id @default(cuid())
@@ -173,6 +184,8 @@ model Clip {
   edit ClipEdit?
   captions CaptionTrack[]
   renders Render[]
+  exports Export[]
+  favorites Favorite[]
 }
 model ClipEdit {
   id String @id @default(cuid())
@@ -206,4 +219,98 @@ model Render {
   updatedAt DateTime @updatedAt
   clip Clip @relation(fields:[clipId],references:[id],onDelete:Cascade)
   mediaAsset MediaAsset? @relation(fields:[mediaAssetId],references:[id],onDelete:SetNull)
+  exports Export[]
+}
+model Export {
+  id String @id @default(cuid())
+  clipId String
+  renderId String?
+  userId String
+  storageKey String?
+  status String @default("READY")
+  createdAt DateTime @default(now())
+  clip Clip @relation(fields:[clipId],references:[id],onDelete:Cascade)
+  render Render? @relation(fields:[renderId],references:[id],onDelete:SetNull)
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+}
+model SocialConnection {
+  id String @id @default(cuid())
+  userId String
+  provider String
+  accountId String
+  accessToken String
+  refreshToken String?
+  expiresAt DateTime?
+  metadata Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  posts ScheduledPost[]
+}
+model ScheduledPost {
+  id String @id @default(cuid())
+  userId String
+  socialConnectionId String?
+  clipId String?
+  scheduledFor DateTime
+  status PublishStatus @default(SCHEDULED)
+  platformPostId String?
+  error String?
+  metadata Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  socialConnection SocialConnection? @relation(fields:[socialConnectionId],references:[id],onDelete:SetNull)
+}
+model AnalyticsRecord {
+  id String @id @default(cuid())
+  userId String
+  platform String
+  postId String
+  views Int @default(0)
+  likes Int @default(0)
+  comments Int @default(0)
+  shares Int @default(0)
+  watchTimeS Float @default(0)
+  recordedAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+}
+model Favorite {
+  id String @id @default(cuid())
+  userId String
+  projectId String?
+  clipId String?
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  project Project? @relation(fields:[projectId],references:[id],onDelete:Cascade)
+  clip Clip? @relation(fields:[clipId],references:[id],onDelete:Cascade)
+}
+model Template {
+  id String @id @default(cuid())
+  userId String
+  name String
+  settings Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+}
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  type String
+  title String
+  body String
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+}
+model CreatorEvent {
+  id String @id @default(cuid())
+  userId String
+  projectId String?
+  event FeedbackEvent
+  metadata Json?
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  project Project? @relation(fields:[projectId],references:[id],onDelete:Cascade)
 }
