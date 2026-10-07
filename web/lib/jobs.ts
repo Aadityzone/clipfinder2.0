@@ -1,0 +1,5 @@
+import { db } from "./db";
+export async function enqueueJob(userId:string,projectId:string,type:string,payload:unknown={}){return db.job.create({data:{userId,projectId,type,payload,status:"QUEUED"}})}
+export async function claimNextJob(){const job=await db.job.findFirst({where:{status:"QUEUED"},orderBy:{createdAt:"asc"}});if(!job)return null;const claimed=await db.job.updateMany({where:{id:job.id,status:"QUEUED"},data:{status:"RETRYING",startedAt:new Date(),attempts:{increment:1}}});return claimed.count?db.job.findUnique({where:{id:job.id}}):null}
+export async function finishJob(id:string){return db.job.update({where:{id},data:{status:"READY",progress:1,finishedAt:new Date(),error:null}})}
+export async function failJob(id:string,error:string){return db.job.update({where:{id},data:{status:"FAILED",error,finishedAt:new Date()}})}
