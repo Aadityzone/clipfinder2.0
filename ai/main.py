@@ -4,6 +4,7 @@ from .schemas import TranscribeRequest,TranscribeResponse
 from .transcribe import transcribe
 from .services.download import download
 from .services.media import ffprobe
+from .services.render import render
 from .highlights import candidates
 import os,uuid
 app=FastAPI(title="Clip Finder AI",version="2.0.0")
@@ -11,6 +12,7 @@ class IngestRequest(BaseModel): url:str; output_dir:str
 class IngestResponse(BaseModel): media_path:str; metadata:dict
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
+class RenderRequest(BaseModel): input_path:str; output_path:str; start:float; end:float; aspect:str="9:16"
 def auth(secret:str|None):
  expected=os.getenv("AI_SERVICE_SECRET")
  if expected and secret!=expected: raise HTTPException(status_code=401,detail="Invalid AI service credentials")
@@ -31,3 +33,8 @@ def transcribe_route(b:TranscribeRequest,x_ai_secret:str|None=Header(default=Non
 @app.post("/v1/analyze",response_model=AnalyzeResponse)
 def analyze(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret);return {"candidates":candidates(b.segments,b.instruction)}
+@app.post("/v1/render")
+def render_route(b:RenderRequest,x_ai_secret:str|None=Header(default=None)):
+ auth(x_ai_secret)
+ try:render(b.input_path,b.output_path,b.start,b.end,b.aspect);return {"output_path":b.output_path}
+ except Exception as e:raise HTTPException(status_code=500,detail=str(e))
