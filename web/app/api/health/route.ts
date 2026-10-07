@@ -1,0 +1,1 @@
+import {db} from "../../../lib/db";export async function GET(){try{await db.$queryRawUnsafe("SELECT 1");return Response.json({ok:true,service:"web",database:"ok"})}catch{return Response.json({ok:false,service:"web",database:"unavailable"},{status:503})}}
