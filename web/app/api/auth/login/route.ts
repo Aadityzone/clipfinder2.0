@@ -1,0 +1,2 @@
+import { NextRequest } from "next/server";import { db } from "../../../../lib/db";import { setSession,verifyPassword } from "../../../../lib/auth";
+export async function POST(req:NextRequest){const b=await req.json();const email=String(b.email??"").trim().toLowerCase();const password=String(b.password??"");const u=await db.user.findUnique({where:{email}});if(!u||!verifyPassword(password,u.passwordHash))return Response.json({error:"Invalid email or password."},{status:401});await setSession(u.id);return Response.json({user:{id:u.id,email:u.email,name:u.name}})}
