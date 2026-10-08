@@ -15,6 +15,7 @@ app=FastAPI(title="Clip Finder AI",version="2.0.0")
 class IngestRequest(BaseModel): url:str; output_dir:str
 class IngestResponse(BaseModel): media_path:str; metadata:dict
 class ProbeRequest(BaseModel): media_path:str
+class ThumbnailRequest(BaseModel): input_path:str; output_path:str; time:float=0
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None; categories:list[str]=[]; media_path:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
 class LongFormResponse(BaseModel): stories:list[dict]; title:str; description:str; chapters:list[dict]
@@ -30,7 +31,8 @@ def ingest(b:IngestRequest,x_ai_secret:str|None=Header(default=None)):
  try:path=download(b.url,os.path.join(b.output_dir,uuid.uuid4().hex));return {"media_path":path,"metadata":ffprobe(path)}
  except Exception as e: raise HTTPException(status_code=500,detail=str(e))
 @app.post("/v1/probe")
-def probe(b:ProbeRequest,x_ai_secret:str|None=Header(default=None)):\n auth(x_ai_secret)\n if not os.path.isfile(b.media_path): raise HTTPException(status_code=404,detail="Media file not found")\n return ffprobe(b.media_path)\n@app.post("/v1/transcribe",response_model=TranscribeResponse)
+def probe(b:ProbeRequest,x_ai_secret:str|None=Header(default=None)):\n auth(x_ai_secret)\n if not os.path.isfile(b.media_path): raise HTTPException(status_code=404,detail="Media file not found")\n return ffprobe(b.media_path)\n@app.post("/v1/thumbnail")
+def thumbnail(b:ThumbnailRequest,x_ai_secret:str|None=Header(default=None)):\n auth(x_ai_secret)\n try:\n  os.makedirs(os.path.dirname(b.output_path),exist_ok=True)\n  import subprocess\n  subprocess.run(["ffmpeg","-y","-ss",str(max(0,b.time)),"-i",b.input_path,"-frames:v","1","-q:v","2",b.output_path],check=True)\n  if not os.path.isfile(b.output_path): raise RuntimeError("Thumbnail was not created")\n  return {"output_path":b.output_path}\n except Exception as e: raise HTTPException(status_code=500,detail=str(e))\n@app.post("/v1/transcribe",response_model=TranscribeResponse)
 def transcribe_route(b:TranscribeRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
  if not os.path.isfile(b.media_path): raise HTTPException(status_code=404,detail="Media file not found")
