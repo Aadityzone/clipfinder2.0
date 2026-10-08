@@ -2,6 +2,8 @@ name: CI
 on: [push, pull_request]
 jobs:
   web:
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/clipfinder
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
