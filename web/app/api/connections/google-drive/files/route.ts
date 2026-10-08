@@ -1,0 +1,2 @@
+import{requireUser}from"../../../../../lib/auth";import{listGoogleDriveVideos}from"../../../../../lib/sources/google-drive";
+export async function GET(){try{const u=await requireUser();return Response.json(await listGoogleDriveVideos(u.id))}catch(e){if(e instanceof Error&&e.message==="UNAUTHENTICATED")return Response.json({error:"Unauthorized"},{status:401});return Response.json({error:e instanceof Error?e.message:"Drive listing failed"},{status:500})}}
