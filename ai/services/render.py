@@ -5,15 +5,13 @@ def render(input_path:str,output_path:str,start:float=0,end:float|None=None,aspe
  vf={"9:16":"crop=ih*9/16:ih:(iw-ih*9/16)/2:0","1:1":"crop=ih:ih:(iw-ih)/2:0","16:9":"scale=iw:ih"}.get(aspect,"scale=iw:ih")
  if len(segs)==1:
   s=segs[0];duration=max(.01,float(s["end"])-float(s["start"]))
-  subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-movflags","+faststart",output_path],check=True)
-  return
+  subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-movflags","+faststart",output_path],check=True);return
  with tempfile.TemporaryDirectory(prefix="clipfinder-render-") as d:
   parts=[]
   for i,s in enumerate(segs):
    p=os.path.join(d,f"part-{i}.mp4");duration=max(.01,float(s["end"])-float(s["start"]))
-   subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-movflags","+faststart",p],check=True)
-   parts.append(p)
+   subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-movflags","+faststart",p],check=True);parts.append(p)
   concat=os.path.join(d,"concat.txt")
   with open(concat,"w",encoding="utf-8") as f:
-   for p in parts:f.write("file '"+p.replace("'","'\\''")+"\'\n")
+   for p in parts:f.write("file "+repr(p)+"\n")
   subprocess.run(["ffmpeg","-y","-f","concat","-safe","0","-i",concat,"-c","copy","-movflags","+faststart",output_path],check=True)
