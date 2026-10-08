@@ -49,6 +49,7 @@ export default function Editor({
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [history, setHistory] = useState<Segment[][]>([]);
+  const [waveform, setWaveform] = useState<number[]>([]);
   const [future, setFuture] = useState<Segment[][]>([]);
 
   const current = segments[selectedSegment];
@@ -358,7 +359,7 @@ export default function Editor({
               seek(((e.clientX - r.left) / r.width) * duration);
             }}
           >
-            {segments.map((s, i) => (
+            {waveform.map((v, i) => <div key={i} className="absolute bottom-1 top-1 w-px bg-white/20" style={{ left: `${(i / Math.max(1, waveform.length - 1)) * 100}%`, transform: `scaleY(${Math.max(0.04, v)})`, transformOrigin: "center" }} />)}\n            {segments.map((s, i) => (
               <button
                 key={`${s.startS}-${s.endS}-${i}`}
                 type="button"
