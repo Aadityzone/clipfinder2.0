@@ -12,7 +12,7 @@ class IngestRequest(BaseModel): url:str; output_dir:str
 class IngestResponse(BaseModel): media_path:str; metadata:dict
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
-class RenderRequest(BaseModel): input_path:str; output_path:str; start:float; end:float; aspect:str="9:16"
+class RenderRequest(BaseModel): input_path:str; output_path:str; start:float=0; end:float=0; aspect:str="9:16"; segments:list[dict]|None=None
 def auth(secret:str|None):
  expected=os.getenv("AI_SERVICE_SECRET")
  if expected and secret!=expected: raise HTTPException(status_code=401,detail="Invalid AI service credentials")
@@ -21,8 +21,7 @@ def health(): return {"ok":True,"service":"ai","version":"2.0.0"}
 @app.post("/v1/ingest",response_model=IngestResponse)
 def ingest(b:IngestRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
- try:
-  path=download(b.url,os.path.join(b.output_dir,uuid.uuid4().hex));return {"media_path":path,"metadata":ffprobe(path)}
+ try:path=download(b.url,os.path.join(b.output_dir,uuid.uuid4().hex));return {"media_path":path,"metadata":ffprobe(path)}
  except Exception as e: raise HTTPException(status_code=500,detail=str(e))
 @app.post("/v1/transcribe",response_model=TranscribeResponse)
 def transcribe_route(b:TranscribeRequest,x_ai_secret:str|None=Header(default=None)):
@@ -36,5 +35,5 @@ def analyze(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
 @app.post("/v1/render")
 def render_route(b:RenderRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
- try:render(b.input_path,b.output_path,b.start,b.end,b.aspect);return {"output_path":b.output_path}
+ try:render(b.input_path,b.output_path,b.start,b.end,b.aspect,b.segments);return {"output_path":b.output_path}
  except Exception as e:raise HTTPException(status_code=500,detail=str(e))
