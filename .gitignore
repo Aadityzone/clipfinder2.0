@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+web/node_modules/
+ai/.venv/
+__pycache__/
+*.pyc
+
+# Next.js
+web/.next/
+web/out/
+
+# local environment
+.env
+.env.*
+!.env.example
+web/.env
+web/.env.*
+!web/.env.example
+ai/.env
+ai/.env.*
+!ai/.env.example
+
+# local media and generated files
+storage/
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.mp3
+
+# Prisma/generated
+web/generated/prisma/
+
+# editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
