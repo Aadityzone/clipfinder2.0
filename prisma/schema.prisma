@@ -2,7 +2,9 @@ generator client {
   provider = "prisma-client"
   output = "../web/generated/prisma"
 }
-datasource db { provider = "postgresql" }
+datasource db {
+  provider = "postgresql"
+}
 
 enum ProjectMode { SHORTS LONG_FORM }
 enum JobStatus { QUEUED DOWNLOADING INGESTING TRANSCRIBING ANALYZING EDITING RENDERING READY FAILED RETRYING CANCELLED }
