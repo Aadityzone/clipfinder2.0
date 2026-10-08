@@ -14,6 +14,7 @@ import os,uuid
 app=FastAPI(title="Clip Finder AI",version="2.0.0")
 class IngestRequest(BaseModel): url:str; output_dir:str
 class IngestResponse(BaseModel): media_path:str; metadata:dict
+class ProbeRequest(BaseModel): media_path:str
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None; categories:list[str]=[]; media_path:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
 class LongFormResponse(BaseModel): stories:list[dict]
@@ -28,7 +29,8 @@ def ingest(b:IngestRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
  try:path=download(b.url,os.path.join(b.output_dir,uuid.uuid4().hex));return {"media_path":path,"metadata":ffprobe(path)}
  except Exception as e: raise HTTPException(status_code=500,detail=str(e))
-@app.post("/v1/transcribe",response_model=TranscribeResponse)
+@app.post("/v1/probe")
+def probe(b:ProbeRequest,x_ai_secret:str|None=Header(default=None)):\n auth(x_ai_secret)\n if not os.path.isfile(b.media_path): raise HTTPException(status_code=404,detail="Media file not found")\n return ffprobe(b.media_path)\n@app.post("/v1/transcribe",response_model=TranscribeResponse)
 def transcribe_route(b:TranscribeRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
  if not os.path.isfile(b.media_path): raise HTTPException(status_code=404,detail="Media file not found")
