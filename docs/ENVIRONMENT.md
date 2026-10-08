@@ -19,3 +19,8 @@ TIKTOK_CLIENT_SECRET=
 ```
 
 YouTube uses server-side OAuth with refresh tokens; TikTok uses Login Kit web OAuth and the Content Posting API. Provider credentials and tokens must remain server-side.
+## Object storage
+Set `STORAGE_PROVIDER=local` for development. For S3/R2-compatible storage, set `STORAGE_PROVIDER=s3`, `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY`. The worker keeps a local working copy for FFmpeg and mirrors durable media to object storage.
+
+## Optional semantic rescoring
+`OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` enable an optional LLM ranking pass after transcript/vision/audio candidate generation. Without the key, the deterministic multimodal scorer remains the ranking engine.
