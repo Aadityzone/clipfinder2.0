@@ -49,12 +49,12 @@ export default function Editor({
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [history, setHistory] = useState<Segment[][]>([]);
-  const [waveform, setWaveform] = useState<number[]>([]);
+  const [waveform, setWaveform] = useState<number[]>([]);\n  const [captionStyle, setCaptionStyle] = useState({ font: "Arial", size: 48, color: "&H00FFFFFF" });
   const [future, setFuture] = useState<Segment[][]>([]);
 
   const current = segments[selectedSegment];
 
-  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
+  useEffect(() => { if (!selected) return; fetch(`/api/clips/${selected.id}/captions?format=json`).then((r) => r.json()).then((d) => { if (d?.style) setCaptionStyle((x) => ({ ...x, ...d.style })); }).catch(() => {}); }, [selected?.id]);\n\n  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
 
   useEffect(() => {
     if (!selected) return;
