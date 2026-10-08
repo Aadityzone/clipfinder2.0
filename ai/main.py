@@ -116,6 +116,15 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
     result = optimize_candidates(b.segments, result)
+    speaker = speaker_signals(b.segments)
+    for candidate in result:
+        related = [x for x in speaker["segments"] if x["end"] > candidate["start"] and x["start"] < candidate["end"]]
+        candidate.setdefault("features", {})["conversation"] = {
+            "questionCount": sum(1 for x in related if x["style"] == "question"),
+            "styleTransitions": sum(1 for x in related if x["transition"]),
+            "secondPerson": sum(x["secondPerson"] for x in related),
+            "firstPerson": sum(x["firstPerson"] for x in related),
+        }
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in b.segments)
     result = score_candidates(result, transcript, b.instruction)
