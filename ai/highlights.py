@@ -25,8 +25,8 @@ def candidates(segments,instruction=None,categories=None,media=None):
    if not ranked:continue
    cat=ranked[0]
   if out and start<out[-1]["end"]:continue
-  face_hits=sum(1 for f in faces if start<=float(f.get("time",-1))<=end)
+  face_points=[f for f in faces if start<=float(f.get("time",-1))<=end]\n  face_hits=len(face_points)\n  focus_x=(sum(float(f.get("x",0.5)) for f in face_points)/face_hits) if face_hits else 0.5
   scene_hits=sum(1 for x in scenes if start<=float(x)<=end)
   sc=min(100,round(sc+min(8,face_hits*1.5)+min(5,scene_hits),2))
-  out.append({"start":start,"end":end,"score":sc,"category":cat,"rationale":"Candidate scored from transcript signals with optional visual face/scene evidence.","features":{"wordCount":len(re.findall(r"[a-z0-9']+",text)),"categoryMatches":matches,"faceHits":face_hits,"sceneHits":scene_hits,"audio":media.get("audio",{})}})
+  out.append({"start":start,"end":end,"score":sc,"category":cat,"rationale":"Candidate scored from transcript signals with optional visual face/scene evidence.","features":{"wordCount":len(re.findall(r"[a-z0-9']+",text)),"categoryMatches":matches,"faceHits":face_hits,"faceFocusX":round(focus_x,4),"sceneHits":scene_hits,"audio":media.get("audio",{})}})
  return sorted(out,key=lambda x:x["score"],reverse=True)[:50]
