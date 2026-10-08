@@ -1,0 +1,2 @@
+import{requireUser}from"../../../../lib/auth";import{createPortal}from"../../../../lib/billing";
+export async function POST(){try{const u=await requireUser();const s=await createPortal(u.id);return Response.json({url:s.url})}catch(e){if(e instanceof Error&&e.message==="UNAUTHENTICATED")return Response.json({error:"Unauthorized"},{status:401});return Response.json({error:e instanceof Error?e.message:"Billing portal unavailable"},{status:503})}}
