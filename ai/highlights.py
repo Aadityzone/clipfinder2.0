@@ -40,6 +40,7 @@ def candidates(segments, instruction=None, categories=None, media=None):
     faces = media.get("vision", {}).get("faces", [])
     scenes = media.get("scenes", {}).get("sceneChanges", [])
     audio = media.get("audioWindows", [])
+    visual = media.get("visual", {}).get("samples", [])
     out = []
     for idx, s in enumerate(segments):
         raw_start, raw_end = float(s["start"]), float(s["end"])
@@ -69,17 +70,22 @@ def candidates(segments, instruction=None, categories=None, media=None):
         scene_hits = sum(1 for x in scenes if start <= float(x) <= end)
         audio_rows = [a for a in audio if float(a.get("end", 0)) > start and float(a.get("start", 0)) < end]
         energy = sum(float(a.get("energy", 0)) for a in audio_rows) / len(audio_rows) if audio_rows else 0.0
+        visual_rows = [v for v in visual if start <= float(v.get("time", -1)) <= end]
+        visual_change = sum(float(v.get("visualChange", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        motion = sum(float(v.get("motion", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        center_detail = sum(float(v.get("centerDetail", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
 
         # Strong moments tend to have a hook, a change, and a payoff signal.
         score_value = min(100, round(base + min(7, face_hits * 1.2) +
-                                     min(6, scene_hits * 1.5) + min(6, energy * 6), 2))
+                                     min(6, scene_hits * 1.5) + min(6, energy * 6) +
+                                     min(5, visual_change * 5) + min(4, motion * 4) + min(2, center_detail * 2), 2))
         out.append({
             "start": start,
             "end": end,
             "text": text,
             "score": score_value,
             "category": cat,
-            "rationale": "Ranked from transcript hook, lexical novelty, category cues, visual change, face presence and audio energy.",
+            "rationale": "Ranked from transcript hook, lexical novelty, category cues, scene/visual change, motion, face presence and audio energy.",
             "features": {
                 "wordCount": len(_words(text)),
                 "segmentIndex": idx,
@@ -88,6 +94,9 @@ def candidates(segments, instruction=None, categories=None, media=None):
                 "faceFocusX": round(focus_x, 4),
                 "sceneHits": scene_hits,
                 "audioEnergy": round(energy, 3),
+                "visualChange": round(visual_change, 4),
+                "motion": round(motion, 4),
+                "centerDetail": round(center_detail, 4),
                 "hookSignals": {
                     "questions": text.count("?"),
                     "exclamations": text.count("!"),
