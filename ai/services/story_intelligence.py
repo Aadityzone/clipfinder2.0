@@ -43,6 +43,34 @@ def story_score(signals: StorySignals) -> float:
         signals.conversational * .12
     ), 2)
 
+def _punctuated_word_bounds(segments: list[dict], start: float, end: float) -> tuple[float, float]:
+    """Snap boundaries to available Whisper word timestamps near sentence punctuation."""
+    words = []
+    for segment in segments:
+        for word in segment.get("words", []) or []:
+            try:
+                ws, we = float(word["start"]), float(word["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if we > start - 3 and ws < end + 3:
+                words.append((ws, we, str(word.get("word", ""))))
+    if not words:
+        return start, end
+
+    words.sort(key=lambda x: x[0])
+    left_candidates = [w for w in words if w[1] <= start + 1.5]
+    right_candidates = [w for w in words if w[0] >= end - 1.5]
+    if left_candidates:
+        left = left_candidates[-1]
+        if left[2].strip().endswith((".", "!", "?")):
+            start = left[1]
+    if right_candidates:
+        right = right_candidates[0]
+        if right[2].strip().startswith((".", "!", "?")):
+            end = right[0]
+    return start, end
+
+
 def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, max_duration=75.0) -> tuple[float, float]:
     anchor = segments[anchor_index]
     center_start, center_end = float(anchor["start"]), float(anchor["end"])
@@ -66,6 +94,9 @@ def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, 
         end = min(start + min_duration, float(segments[-1]["end"]))
     if end - start > max_duration:
         end = start + max_duration
+    start, end = _punctuated_word_bounds(segments, start, end)
+    if end - start < min_duration:
+        end = min(float(segments[-1]["end"]), start + min_duration)
     return max(0, start), end
 
 def optimize_candidates(segments: list[dict], candidates: list[dict]) -> list[dict]:
