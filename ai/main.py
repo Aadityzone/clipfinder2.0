@@ -141,12 +141,15 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         labels = [s.get("speaker") for s in related if s.get("speaker")]
         if labels:
             counts = {label: labels.count(label) for label in set(labels)}
+            turns = sum(1 for a, z in zip(labels, labels[1:]) if a != z)
             candidate.setdefault("features", {})["speakers"] = {
                 "labels": sorted(counts),
                 "dominant": max(counts, key=counts.get),
                 "speakerCount": len(counts),
-                "turnCount": sum(1 for a, z in zip(labels, labels[1:]) if a != z),
+                "turnCount": turns,
             }
+            if len(counts) >= 2:
+                candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
 
