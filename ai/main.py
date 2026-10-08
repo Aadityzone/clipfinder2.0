@@ -6,7 +6,7 @@ from .services.download import download
 from .services.media import ffprobe
 from .services.render import render
 from .highlights import candidates
-from .longform import stories
+from .longform import stories,package
 from .services.media_intelligence import analyze_media
 from .services.dedup import deduplicate
 from .services.llm import score_candidates
@@ -17,7 +17,7 @@ class IngestResponse(BaseModel): media_path:str; metadata:dict
 class ProbeRequest(BaseModel): media_path:str
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None; categories:list[str]=[]; media_path:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
-class LongFormResponse(BaseModel): stories:list[dict]
+class LongFormResponse(BaseModel): stories:list[dict]; title:str; description:str; chapters:list[dict]
 class RenderRequest(BaseModel): input_path:str; output_path:str; start:float=0; end:float=0; aspect:str="9:16"; segments:list[dict]|None=None; captions:list[dict]|None=None; caption_style:dict|None=None
 def auth(secret:str|None):
  expected=os.getenv("AI_SERVICE_SECRET")
@@ -41,7 +41,7 @@ def analyze(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret);media=analyze_media(b.media_path) if b.media_path else {}; result=candidates(b.segments,b.instruction,b.categories,media); result=deduplicate(result); result=score_candidates(result," ".join(str(s.get("text","")) for s in b.segments),b.instruction); return {"candidates":result}
 @app.post("/v1/longform",response_model=LongFormResponse)
 def longform(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
- auth(x_ai_secret);return {"stories":stories(b.segments)}
+ auth(x_ai_secret);items=stories(b.segments);meta=package(b.segments,items);return {"stories":items,**meta}
 @app.post("/v1/render")
 def render_route(b:RenderRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
