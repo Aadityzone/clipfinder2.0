@@ -54,6 +54,8 @@ export default function Editor({
 
   const current = segments[selectedSegment];
 
+  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
+
   useEffect(() => {
     if (!selected) return;
     const nextSegments =
