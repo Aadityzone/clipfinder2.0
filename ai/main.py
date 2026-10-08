@@ -19,7 +19,7 @@ class ThumbnailRequest(BaseModel): input_path:str; output_path:str; time:float=0
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None; categories:list[str]=[]; media_path:str|None=None
 class AnalyzeResponse(BaseModel): candidates:list[dict]
 class LongFormResponse(BaseModel): stories:list[dict]; title:str; description:str; chapters:list[dict]
-class RenderRequest(BaseModel): input_path:str; output_path:str; start:float=0; end:float=0; aspect:str="9:16"; segments:list[dict]|None=None; captions:list[dict]|None=None; caption_style:dict|None=None
+class RenderRequest(BaseModel): input_path:str; output_path:str; start:float=0; end:float=0; aspect:str="9:16"; segments:list[dict]|None=None; captions:list[dict]|None=None; caption_style:dict|None=None; focus_x:float=0.5
 def auth(secret:str|None):
  expected=os.getenv("AI_SERVICE_SECRET")
  if expected and secret!=expected: raise HTTPException(status_code=401,detail="Invalid AI service credentials")
@@ -47,5 +47,5 @@ def longform(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
 @app.post("/v1/render")
 def render_route(b:RenderRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
- try:render(b.input_path,b.output_path,b.start,b.end,b.aspect,b.segments,b.captions,b.caption_style);\n  if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path)<1024: raise RuntimeError("Render output was not created or is invalid")\n  return {"output_path":b.output_path,"size":os.path.getsize(b.output_path)}
+ try:render(b.input_path,b.output_path,b.start,b.end,b.aspect,b.segments,b.captions,b.caption_style,b.focus_x);\n  if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path)<1024: raise RuntimeError("Render output was not created or is invalid")\n  return {"output_path":b.output_path,"size":os.path.getsize(b.output_path)}
  except Exception as e:raise HTTPException(status_code=500,detail=str(e))
