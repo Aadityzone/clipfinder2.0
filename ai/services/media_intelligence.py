@@ -3,6 +3,7 @@ import re
 import subprocess
 
 from .audio_intelligence import loudness_windows
+from .visual_intelligence import sample_visual_features
 
 def audio_features(path: str) -> dict:
     if not os.path.isfile(path):
@@ -67,9 +68,11 @@ def face_features(path: str) -> dict:
 
 def analyze_media(path: str) -> dict:
     audio, windows = audio_features(path)
+    visual = sample_visual_features(path)
     return {
         "audio": audio,
         "audioWindows": windows,
         "scenes": scene_features(path),
         "vision": face_features(path),
+        "visual": visual,
     }
