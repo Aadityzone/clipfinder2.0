@@ -10,7 +10,7 @@ def render(input_path:str,output_path:str,start:float=0,end:float|None=None,aspe
   parts=[]
   for i,s in enumerate(segs):
    p=os.path.join(d,f"part-{i}.mp4");duration=max(.01,float(s["end"])-float(s["start"]))
-   subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-c:a","aac","-movflags","+faststart",p],check=True);parts.append(p)
+   subprocess.run(["ffmpeg","-y","-ss",str(s["start"]),"-i",input_path,"-t",str(duration),"-vf",vf,"-c:v","libx264","-preset","veryfast","-crf","20","-af","loudnorm=I=-16:TP=-1.5:LRA=11","-c:a","aac","-movflags","+faststart",p],check=True);parts.append(p)
   concat=os.path.join(d,"concat.txt")
   with open(concat,"w",encoding="utf-8") as f:
    for p in parts:f.write("file "+repr(p)+"\n")
