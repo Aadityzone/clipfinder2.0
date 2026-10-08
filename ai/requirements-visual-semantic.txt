@@ -1,0 +1,4 @@
+# Optional visual semantic backend
+# Only install when VISUAL_SEMANTIC_BACKEND=clip is enabled.
+transformers>=4.45,<6
+torch>=2.4,<3
