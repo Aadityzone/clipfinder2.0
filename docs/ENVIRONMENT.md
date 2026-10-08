@@ -24,3 +24,6 @@ Set `STORAGE_PROVIDER=local` for development. For S3/R2-compatible storage, set 
 
 ## Optional semantic rescoring
 `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` enable an optional LLM ranking pass after transcript/vision/audio candidate generation. Without the key, the deterministic multimodal scorer remains the ranking engine.
+
+## Billing
+Stripe billing is implemented but remains inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` are configured. Checkout, customer portal, and subscription webhooks then become real Stripe-backed flows.
