@@ -13,6 +13,7 @@ from .services.llm import score_candidates
 from .services.semantic import enrich_semantics
 from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
+from .services.diarization import diarize, diarization_status
 import os
 import uuid
 
@@ -109,6 +110,11 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/v1/ai-capabilities")
+def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
+    auth(x_ai_secret)
+    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2"))}
+
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
@@ -116,7 +122,9 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
     result = optimize_candidates(b.segments, result)
-    speaker = speaker_signals(b.segments)
+    diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
+    analysis_segments = diarized.get("segments") or b.segments
+    speaker = speaker_signals(analysis_segments)
     for candidate in result:
         related = [x for x in speaker["segments"] if x["end"] > candidate["start"] and x["start"] < candidate["end"]]
         candidate.setdefault("features", {})["conversation"] = {
@@ -126,8 +134,19 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             "firstPerson": sum(x["firstPerson"] for x in related),
         }
     result = deduplicate(result)
-    transcript = " ".join(str(s.get("text", "")) for s in b.segments)
+    transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
     result = score_candidates(result, transcript, b.instruction)
+    for candidate in result:
+        related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
+        labels = [s.get("speaker") for s in related if s.get("speaker")]
+        if labels:
+            counts = {label: labels.count(label) for label in set(labels)}
+            candidate.setdefault("features", {})["speakers"] = {
+                "labels": sorted(counts),
+                "dominant": max(counts, key=counts.get),
+                "speakerCount": len(counts),
+                "turnCount": sum(1 for a, z in zip(labels, labels[1:]) if a != z),
+            }
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
 
