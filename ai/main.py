@@ -6,12 +6,14 @@ from .services.download import download
 from .services.media import ffprobe
 from .services.render import render
 from .highlights import candidates
+from .longform import stories
 import os,uuid
 app=FastAPI(title="Clip Finder AI",version="2.0.0")
 class IngestRequest(BaseModel): url:str; output_dir:str
 class IngestResponse(BaseModel): media_path:str; metadata:dict
 class AnalyzeRequest(BaseModel): segments:list[dict]; instruction:str|None=None; categories:list[str]=[]
 class AnalyzeResponse(BaseModel): candidates:list[dict]
+class LongFormResponse(BaseModel): stories:list[dict]
 class RenderRequest(BaseModel): input_path:str; output_path:str; start:float=0; end:float=0; aspect:str="9:16"; segments:list[dict]|None=None
 def auth(secret:str|None):
  expected=os.getenv("AI_SERVICE_SECRET")
@@ -32,6 +34,9 @@ def transcribe_route(b:TranscribeRequest,x_ai_secret:str|None=Header(default=Non
 @app.post("/v1/analyze",response_model=AnalyzeResponse)
 def analyze(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret);return {"candidates":candidates(b.segments,b.instruction,b.categories)}
+@app.post("/v1/longform",response_model=LongFormResponse)
+def longform(b:AnalyzeRequest,x_ai_secret:str|None=Header(default=None)):
+ auth(x_ai_secret);return {"stories":stories(b.segments)}
 @app.post("/v1/render")
 def render_route(b:RenderRequest,x_ai_secret:str|None=Header(default=None)):
  auth(x_ai_secret)
