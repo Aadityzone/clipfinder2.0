@@ -1,0 +1,2 @@
+"use client";import{useState}from"react";
+export default function CancelButton({id}:{id:string}){const[busy,setBusy]=useState(false);async function cancel(){if(!confirm("Cancel this scheduled post?"))return;setBusy(true);try{const r=await fetch("/api/scheduled-posts/"+id,{method:"POST"});if(!r.ok)throw new Error(await r.text());location.reload()}finally{setBusy(false)}}return <button onClick={cancel} disabled={busy} className="mt-3 rounded-lg border border-red-300/20 px-3 py-2 text-xs text-red-200 disabled:opacity-40">{busy?"Cancelling…":"Cancel"}</button>}
