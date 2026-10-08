@@ -5,7 +5,7 @@ def _run(cmd:list[str])->str:
 
 def audio_features(path:str)->dict:
     if not os.path.isfile(path): return {}
-    p=subprocess.run(["ffmpeg","-hide_banner","-i",path,"-af","volumedetect","-f","null","-"],capture_output=True,text=True)
+    p=subprocess.run(["ffmpeg","-hide_banner","-i",path,"-af","volumedetect","-f","null","-"],capture_output=True,text=True)\n    silence=subprocess.run(["ffmpeg","-hide_banner","-i",path,"-af","silencedetect=noise=-35dB:d=0.4","-f","null","-"],capture_output=True,text=True)
     text=p.stderr
     mean=re.search(r"mean_volume:\s*(-?[0-9.]+) dB",text)
     peak=re.search(r"max_volume:\s*(-?[0-9.]+) dB",text)
