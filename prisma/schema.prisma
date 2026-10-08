@@ -21,6 +21,8 @@ model User {
   name String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  failedLoginCount Int @default(0)
+  lockedUntil DateTime?
   projects Project[]
   jobs Job[]
   sources Source[]
