@@ -14,6 +14,7 @@ from .services.semantic import enrich_semantics
 from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
 from .services.diarization import diarize, diarization_status
+from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 import os
 import uuid
 
@@ -113,12 +114,14 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2"))}
+    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2")), "visual": visual_capabilities()}
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     media = analyze_media(b.media_path) if b.media_path else {}
+    if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
+        media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
     result = optimize_candidates(b.segments, result)
