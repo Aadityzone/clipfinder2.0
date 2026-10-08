@@ -1,0 +1,3 @@
+import{requireUser}from"../../../../../../lib/auth";import{db}from"../../../../../../lib/db";import{getStorageRange}from"../../../../../../lib/storage";
+export const runtime="nodejs";
+export async function GET(_:Request,{params}:{params:Promise<{id:string}>}){try{const u=await requireUser();const{id}=await params;const d=await db.longFormDocument.findFirst({where:{id,project:{userId:u.id}}});if(!d?.thumbnailKey)return new Response("Not found",{status:404});const o=await getStorageRange(d.thumbnailKey);return new Response(o.body,{headers:{"Content-Type":"image/jpeg","Cache-Control":"private, max-age=60"}})}catch{return new Response("Not found",{status:404})}}
