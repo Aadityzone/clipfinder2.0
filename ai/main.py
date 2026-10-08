@@ -11,6 +11,8 @@ from .services.media_intelligence import analyze_media
 from .services.dedup import deduplicate
 from .services.llm import score_candidates
 from .services.semantic import enrich_semantics
+from .services.story_intelligence import optimize_candidates
+from .services.speaker_intelligence import speaker_signals
 import os
 import uuid
 
@@ -113,6 +115,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     media = analyze_media(b.media_path) if b.media_path else {}
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
+    result = optimize_candidates(b.segments, result)
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in b.segments)
     result = score_candidates(result, transcript, b.instruction)
