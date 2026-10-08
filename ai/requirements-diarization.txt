@@ -1,0 +1,4 @@
+# Optional true speaker diarization stack
+# Install this only when enabling speaker labels; it is intentionally separate
+# from the default AI requirements because it adds a large ML runtime.
+pyannote.audio>=4,<5
