@@ -6,3 +6,4 @@ ffmpeg-python>=0.2,<1
 python-multipart>=0.0.20,<1
 pydantic>=2.11,<3
 opencv-python-headless>=4.10,<5
+pytest>=8.3,<9
