@@ -1,0 +1,2 @@
+# Optional OCR backend. Requires the system Tesseract executable too.
+pytesseract>=0.3.13,<1
