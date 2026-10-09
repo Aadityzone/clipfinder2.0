@@ -49,12 +49,15 @@ export default function Editor({
   const [renderStatus, setRenderStatus] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [history, setHistory] = useState<Segment[][]>([]);
-  const [waveform, setWaveform] = useState<number[]>([]);\n  const [captionStyle, setCaptionStyle] = useState({ font: "Arial", size: 48, color: "&H00FFFFFF" });
+  const [waveform, setWaveform] = useState<number[]>([]);
+  const [captionStyle, setCaptionStyle] = useState({ font: "Arial", size: 48, color: "&H00FFFFFF" });
   const [future, setFuture] = useState<Segment[][]>([]);
 
   const current = segments[selectedSegment];
 
-  useEffect(() => { if (!selected) return; fetch(`/api/clips/${selected.id}/captions?format=json`).then((r) => r.json()).then((d) => { if (d?.style) setCaptionStyle((x) => ({ ...x, ...d.style })); }).catch(() => {}); }, [selected?.id]);\n\n  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
+  useEffect(() => { if (!selected) return; fetch(`/api/clips/${selected.id}/captions?format=json`).then((r) => r.json()).then((d) => { if (d?.style) setCaptionStyle((x) => ({ ...x, ...d.style })); }).catch(() => {}); }, [selected?.id]);
+
+  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
 
   useEffect(() => {
     if (!selected) return;
@@ -361,7 +364,8 @@ export default function Editor({
               seek(((e.clientX - r.left) / r.width) * duration);
             }}
           >
-            {waveform.map((v, i) => <div key={i} className="absolute bottom-1 top-1 w-px bg-white/20" style={{ left: `${(i / Math.max(1, waveform.length - 1)) * 100}%`, transform: `scaleY(${Math.max(0.04, v)})`, transformOrigin: "center" }} />)}\n            {segments.map((s, i) => (
+            {waveform.map((v, i) => <div key={i} className="absolute bottom-1 top-1 w-px bg-white/20" style={{ left: `${(i / Math.max(1, waveform.length - 1)) * 100}%`, transform: `scaleY(${Math.max(0.04, v)})`, transformOrigin: "center" }} />)}
+            {segments.map((s, i) => (
               <button
                 key={`${s.startS}-${s.endS}-${i}`}
                 type="button"
