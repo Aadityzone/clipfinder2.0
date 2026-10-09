@@ -3,7 +3,7 @@
 Create `web/.env.local` with `DATABASE_URL`, `AUTH_SECRET`, `AI_SERVICE_URL`, `AI_SERVICE_SECRET`, and `MEDIA_STORAGE_ROOT`.
 ## AI
 Create `ai/.env` with `AI_SERVICE_SECRET`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, and `MEDIA_STORAGE_ROOT`.
-Never commit real secrets. The AI service can run locally without a secret, but production must configure one.
+Never commit real secrets. The AI service can run locally without a secret. In production, set `AI_SERVICE_SECRET` and `NODE_ENV=production` (or `ENVIRONMENT=production`); authenticated AI endpoints fail closed with HTTP 503 if the secret is missing and compare supplied secrets in constant time. The web and AI service must use the same secret.
 
 
 ## Publishing integrations
@@ -27,3 +27,8 @@ Set `STORAGE_PROVIDER=local` for development. For S3/R2-compatible storage, set 
 
 ## Billing
 Stripe billing is implemented but remains inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` are configured. Checkout, customer portal, and subscription webhooks then become real Stripe-backed flows.
+
+
+## Runtime health checks
+
+The web health endpoint at `GET /api/health` checks PostgreSQL connectivity, the Python AI service `/health` endpoint, and write access to the configured local working-storage directory. It returns HTTP 200 only when all three checks pass, otherwise HTTP 503 with dependency statuses only (never credentials or filesystem paths).
