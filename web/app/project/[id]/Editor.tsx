@@ -305,7 +305,7 @@ export default function Editor({
         {clips.map((c) => (
           <button
             key={c.id}
-            onClick={() => selectClip(c)
+            onClick={() => selectClip(c)}
             className={`mb-2 w-full rounded-xl border p-3 text-left ${
               selected?.id === c.id ? "border-lime-300/60 bg-lime-300/10" : "border-white/10 bg-white/[.02]"
             }`}
