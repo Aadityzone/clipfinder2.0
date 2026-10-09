@@ -4,6 +4,7 @@ import subprocess
 
 from .audio_intelligence import loudness_windows
 from .visual_intelligence import sample_visual_features
+from .action_intelligence import analyze_on_screen
 
 def audio_features(path: str) -> dict:
     if not os.path.isfile(path):
@@ -69,10 +70,12 @@ def face_features(path: str) -> dict:
 def analyze_media(path: str) -> dict:
     audio, windows = audio_features(path)
     visual = sample_visual_features(path)
+    on_screen = analyze_on_screen(path)
     return {
         "audio": audio,
         "audioWindows": windows,
         "scenes": scene_features(path),
         "vision": face_features(path),
         "visual": visual,
+        "onScreen": on_screen,
     }
