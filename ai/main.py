@@ -16,6 +16,7 @@ from .services.speaker_intelligence import speaker_signals
 from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 from .services.action_intelligence import _classify_ocr
+from .services.creator_feedback import apply_creator_preferences
 import os
 import uuid
 import importlib.util
@@ -43,6 +44,7 @@ class AnalyzeRequest(BaseModel):
     instruction: str | None = None
     categories: list[str] = []
     media_path: str | None = None
+    creator_preferences: dict[str, float] | None = None
 
 class AnalyzeResponse(BaseModel):
     candidates: list[dict]
@@ -155,6 +157,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             }
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
+    result = apply_creator_preferences(result, b.creator_preferences)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
 
