@@ -41,6 +41,8 @@ def candidates(segments, instruction=None, categories=None, media=None):
     scenes = media.get("scenes", {}).get("sceneChanges", [])
     audio = media.get("audioWindows", [])
     visual = media.get("visual", {}).get("samples", [])
+    on_screen = media.get("onScreen", {}).get("samples", [])
+    semantic = media.get("visualSemantic", [])
     out = []
     for idx, s in enumerate(segments):
         raw_start, raw_end = float(s["start"]), float(s["end"])
@@ -74,18 +76,26 @@ def candidates(segments, instruction=None, categories=None, media=None):
         visual_change = sum(float(v.get("visualChange", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
         motion = sum(float(v.get("motion", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
         center_detail = sum(float(v.get("centerDetail", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        screen_rows = [v for v in on_screen if start <= float(v.get("time", -1)) <= end]
+        action_labels = sorted({label for row in screen_rows for label in row.get("actionLabels", [])})
+        ocr_text = " ".join(str(row.get("ocrText", "")) for row in screen_rows).strip()
+        gameplay_like = sum(1 for row in screen_rows if row.get("gameplayLike")) / len(screen_rows) if screen_rows else 0.0
+        semantic_rows = [v for v in semantic if start <= float(v.get("time", -1)) <= end]
+        semantic_score = sum(float(v.get("score", 0)) for v in semantic_rows) / len(semantic_rows) if semantic_rows else 0.0
 
         # Strong moments tend to have a hook, a change, and a payoff signal.
         score_value = min(100, round(base + min(7, face_hits * 1.2) +
                                      min(6, scene_hits * 1.5) + min(6, energy * 6) +
-                                     min(5, visual_change * 5) + min(4, motion * 4) + min(2, center_detail * 2), 2))
+                                     min(5, visual_change * 5) + min(4, motion * 4) + min(2, center_detail * 2) +
+                                     min(4, len(action_labels) * 1.5) + min(2, gameplay_like * 2) +
+                                     (max(0, min(5, (semantic_score - 50) * 0.1)) if semantic_rows else 0), 2))
         out.append({
             "start": start,
             "end": end,
             "text": text,
             "score": score_value,
             "category": cat,
-            "rationale": "Ranked from transcript hook, lexical novelty, category cues, scene/visual change, motion, face presence and audio energy.",
+            "rationale": "Ranked from transcript, audio, visual change/motion, face presence and available on-screen action cues.",
             "features": {
                 "wordCount": len(_words(text)),
                 "segmentIndex": idx,
@@ -97,6 +107,10 @@ def candidates(segments, instruction=None, categories=None, media=None):
                 "visualChange": round(visual_change, 4),
                 "motion": round(motion, 4),
                 "centerDetail": round(center_detail, 4),
+                "onScreenActionLabels": action_labels,
+                "onScreenText": ocr_text[:1200],
+                "gameplayLikeRatio": round(gameplay_like, 4),
+                "visualSemanticScore": round(semantic_score, 3) if semantic_rows else None,
                 "hookSignals": {
                     "questions": text.count("?"),
                     "exclamations": text.count("!"),
