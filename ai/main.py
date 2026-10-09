@@ -18,6 +18,7 @@ from .services.visual_intelligence import semantic_frame_scores, visual_capabili
 from .services.action_intelligence import _classify_ocr
 import os
 import uuid
+import importlib.util
 
 app = FastAPI(title="Clip Finder AI", version="2.2.0")
 
@@ -115,7 +116,7 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2")), "visual": visual_capabilities(), "ocr": {"installed": __import__("importlib").util.find_spec("pytesseract") is not None, "requires_system_tesseract": True}}
+    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2")), "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "requires_system_tesseract": True}}
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
