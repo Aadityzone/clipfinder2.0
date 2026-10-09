@@ -1,21 +1,10 @@
 import { requireUser } from "../../../../lib/auth";
-import { db } from "../../../../lib/db";
-import { buildCreatorFeedbackProfile } from "../../../../lib/creator-feedback";
+import { loadCreatorFeedbackProfile } from "../../../../lib/creator-feedback";
 
 export async function GET() {
   try {
     const user = await requireUser();
-    const clips = await db.clip.findMany({
-      where: {
-        project: { userId: user.id },
-        status: { in: ["SELECTED", "REJECTED"] },
-        highlightId: { not: null },
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 300,
-      select: { status: true, highlight: { select: { features: true } } },
-    });
-    const profile = buildCreatorFeedbackProfile(clips);
+    const profile = await loadCreatorFeedbackProfile(user.id);
     return Response.json({
       ...profile,
       message: profile.active
