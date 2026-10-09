@@ -68,6 +68,16 @@ def _punctuated_word_bounds(segments: list[dict], start: float, end: float) -> t
         right = right_candidates[0]
         if right[2].strip().startswith((".", "!", "?")):
             end = right[0]
+
+    # If the requested end lands inside the next sentence, stop at its first
+    # word rather than keeping the sentence that follows the punctuation.
+    for index, word in enumerate(words[:-1]):
+        if word[1] > end or not word[2].strip().endswith((".", "!", "?")):
+            continue
+        next_word = words[index + 1]
+        if word[1] <= next_word[0] < end and end - next_word[0] <= 1.5:
+            end = next_word[0]
+            break
     return start, end
 
 
