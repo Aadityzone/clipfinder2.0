@@ -81,9 +81,14 @@ def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
         path = download(b.url, os.path.join(b.output_dir, uuid.uuid4().hex))
-        return {"media_path": path, "metadata": ffprobe(path)}
+        metadata = ffprobe(path)
+        if not metadata.get("duration") or not metadata.get("width") or not metadata.get("height"):
+            raise RuntimeError("Downloaded media has no valid video stream or duration.")
+        return {"media_path": path, "metadata": metadata}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e))
 
 @app.post("/v1/probe")
 def probe(b: ProbeRequest, x_ai_secret: str | None = Header(default=None)):
