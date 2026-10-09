@@ -1,3 +1,5 @@
+import { db } from "./db";
+
 type FeatureMap = Record<string, number>;
 
 const FEATURE_KEYS = [
@@ -94,4 +96,42 @@ export function buildCreatorFeedbackProfile(clips: FeedbackClip[]): CreatorFeedb
     weights,
     minSamplesPerClass,
   };
+}
+
+/**
+ * Rebuild a profile from the latest explicit decision for each clip.
+ * Decision events survive later edit/render status changes, so editing an
+ * accepted clip does not erase the creator's original feedback.
+ */
+export async function loadCreatorFeedbackProfile(userId: string): Promise<CreatorFeedbackProfile> {
+  const events = await db.creatorEvent.findMany({
+    where: { userId, event: { in: ["ACCEPT", "REJECT"] } },
+    orderBy: { createdAt: "desc" },
+    take: 1000,
+    select: { event: true, metadata: true },
+  });
+
+  const latestDecision = new Map<string, "ACCEPT" | "REJECT">();
+  for (const event of events) {
+    const metadata = object(event.metadata);
+    const clipId = typeof metadata.clipId === "string" ? metadata.clipId : "";
+    if (!clipId || latestDecision.has(clipId)) continue;
+    latestDecision.set(clipId, event.event === "ACCEPT" ? "ACCEPT" : "REJECT");
+  }
+
+  if (latestDecision.size === 0) return buildCreatorFeedbackProfile([]);
+
+  const clips = await db.clip.findMany({
+    where: {
+      id: { in: [...latestDecision.keys()] },
+      project: { userId },
+      highlightId: { not: null },
+    },
+    select: { id: true, highlight: { select: { features: true } } },
+  });
+
+  return buildCreatorFeedbackProfile(clips.map((clip) => ({
+    status: latestDecision.get(clip.id) === "ACCEPT" ? "SELECTED" : "REJECTED",
+    highlight: clip.highlight,
+  })));
 }
