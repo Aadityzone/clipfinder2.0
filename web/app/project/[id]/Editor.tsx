@@ -54,34 +54,44 @@ export default function Editor({
   const [future, setFuture] = useState<Segment[][]>([]);
 
   const current = segments[selectedSegment];
+  const selectedId = selected?.id;
 
-  useEffect(() => { if (!selected) return; fetch(`/api/clips/${selected.id}/captions?format=json`).then((r) => r.json()).then((d) => { if (d?.style) setCaptionStyle((x) => ({ ...x, ...d.style })); }).catch(() => {}); }, [selected?.id]);
-
-  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
-
-  useEffect(() => {
-    if (!selected) return;
-    const nextSegments =
-      selected.edit?.segments ?? [{ startS: selected.startS, endS: selected.endS }];
-    setSegments(nextSegments);
+  const selectClip = (clip: Clip) => {
+    setSelected(clip);
+    setSegments(clip.edit?.segments ?? [{ startS: clip.startS, endS: clip.endS }]);
     setSelectedSegment(0);
-    setAspect(selected.edit?.aspectRatio ?? "9:16");
+    setAspect(clip.edit?.aspectRatio ?? "9:16");
     setHistory([]);
     setFuture([]);
     setMessage("");
     setRenderId(null);
     setRenderStatus(null);
+  };
 
-    fetch(`/api/clips/${selected.id}/render`)
+  useEffect(() => {
+    if (!selectedId) return;
+    fetch(`/api/clips/${selectedId}/captions?format=json`)
+      .then((r) => r.json())
+      .then((d) => { if (d?.style) setCaptionStyle((x) => ({ ...x, ...d.style })); })
+      .catch(() => {});
+  }, [selectedId]);
+
+  useEffect(() => { if (!mediaId) return; fetch(`/api/media/${mediaId}/waveform`).then((r) => r.json()).then((d) => setWaveform(Array.isArray(d.samples) ? d.samples : [])).catch(() => setWaveform([])); }, [mediaId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    fetch(`/api/clips/${selectedId}/render`)
       .then((r) => r.json())
       .then((d) => {
-        if (d.render) {
+        if (!cancelled && d.render) {
           setRenderId(d.render.id);
           setRenderStatus(d.render.status);
         }
       })
       .catch(() => {});
-  }, [selected?.id]);
+    return () => { cancelled = true; };
+  }, [selectedId]);
 
   useEffect(() => {
     const v = video.current;
@@ -295,7 +305,7 @@ export default function Editor({
         {clips.map((c) => (
           <button
             key={c.id}
-            onClick={() => setSelected(c)}
+            onClick={() => selectClip(c)
             className={`mb-2 w-full rounded-xl border p-3 text-left ${
               selected?.id === c.id ? "border-lime-300/60 bg-lime-300/10" : "border-white/10 bg-white/[.02]"
             }`}
