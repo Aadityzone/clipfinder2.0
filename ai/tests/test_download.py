@@ -62,3 +62,21 @@ def test_download_reports_missing_ytdlp(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader.subprocess, "run", fake_run)
     with pytest.raises(RuntimeError, match="yt-dlp is not installed"):
         downloader.download("https://www.twitch.tv/videos/2889984350", str(tmp_path))
+
+def test_download_reports_timeout(tmp_path, monkeypatch):
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="yt-dlp", timeout=downloader.DOWNLOAD_TIMEOUT_SECONDS)
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="timed out after 3 hours"):
+        downloader.download("https://www.twitch.tv/videos/2889984350", str(tmp_path))
+
+
+def test_download_rejects_empty_output(tmp_path, monkeypatch):
+    def fake_run(args, **kwargs):
+        (tmp_path / "source.mp4.part").write_bytes(b"partial")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="no complete media file"):
+        downloader.download("https://www.twitch.tv/videos/2889984350", str(tmp_path))
