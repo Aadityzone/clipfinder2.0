@@ -40,6 +40,30 @@ export async function claimNextJob() {
   return claimed.count ? db.job.findUnique({ where: { id: candidate.id } }) : null;
 }
 
+/** Atomically mark a stage complete and enqueue its successor, so a worker crash
+ * cannot leave the pipeline permanently between stages. */
+export async function completeJobAndEnqueue(
+  id: string,
+  next: { userId: string; projectId: string | null; type: string; payload: unknown },
+) {
+  return db.$transaction(async (tx) => {
+    const completed = await tx.job.updateMany({
+      where: { id, status: { not: "CANCELLED" } },
+      data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
+    });
+    if (!completed.count) return null;
+    return tx.job.create({
+      data: {
+        userId: next.userId,
+        projectId: next.projectId,
+        type: next.type,
+        payload: next.payload as any,
+        status: "QUEUED",
+      },
+    });
+  });
+}
+
 /** Throw at worker checkpoints so a cancellation is not overwritten by success/failure. */
 export async function assertJobNotCancelled(id: string) {
   const job = await db.job.findUnique({ where: { id }, select: { status: true } });
