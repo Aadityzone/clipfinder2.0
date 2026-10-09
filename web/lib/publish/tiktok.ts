@@ -1,4 +1,4 @@
-import{stat,createReadStream}from"node:fs";import{accessTokenFor}from"../social";import{Readable}from"node:stream";
+import{createReadStream}from"node:fs";import{stat}from"node:fs/promises";import{accessTokenFor}from"../social";import{Readable}from"node:stream";
 const CHUNK=10_000_000;
 export async function publishTikTok(userId:string,filePath:string,title:string){
  const token=await accessTokenFor(userId,"tiktok");const info=await stat(filePath);
