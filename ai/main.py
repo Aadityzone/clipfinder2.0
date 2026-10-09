@@ -15,10 +15,11 @@ from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
 from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
+from .services.action_intelligence import _classify_ocr
 import os
 import uuid
 
-app = FastAPI(title="Clip Finder AI", version="2.1.0")
+app = FastAPI(title="Clip Finder AI", version="2.2.0")
 
 class IngestRequest(BaseModel):
     url: str
@@ -69,7 +70,7 @@ def auth(secret: str | None):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "ai", "version": "2.1.0"}
+    return {"ok": True, "service": "ai", "version": "2.2.0"}
 
 @app.post("/v1/ingest", response_model=IngestResponse)
 def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
@@ -114,7 +115,7 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2")), "visual": visual_capabilities()}
+    return {"diarization": diarization_status(), "semantic_embeddings": bool(os.getenv("SEMANTIC_MODEL", "all-MiniLM-L6-v2")), "visual": visual_capabilities(), "ocr": {"installed": __import__("importlib").util.find_spec("pytesseract") is not None, "requires_system_tesseract": True}}
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
