@@ -1,7 +1,7 @@
 import { db } from "./db";
 const STALE_AFTER_MS=10*60*1000;
 
-export async function enqueueJob(userId:string,projectId:string,type:string,payload:unknown={},runAfter?:Date){return db.job.create({data:{userId,projectId,type,payload,status:"QUEUED",runAfter}})}
+export async function enqueueJob(userId:string,projectId:string,type:string,payload:unknown={},runAfter?:Date){return db.job.create({data:{userId,projectId,type,payload:payload as any,status:"QUEUED",runAfter}})}
 export async function claimNextJob(){
  const staleBefore=new Date(Date.now()-STALE_AFTER_MS);
  const runnable={OR:[{runAfter:null},{runAfter:{lte:new Date()}}]};

@@ -104,7 +104,7 @@ export default function Editor({
 
   const seek = (t: number) => {
     const next = Math.max(0, Math.min(duration, t));
-    if (video.current) video.currentTime = next;
+    if (video.current) video.current.currentTime = next;
     setTime(next);
   };
 
