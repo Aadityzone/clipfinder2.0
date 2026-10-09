@@ -1,3 +1,113 @@
-import { NextRequest } from "next/server";import { db } from "../../../lib/db";import { requireUser } from "../../../lib/auth";
-export async function GET(){try{const u=await requireUser();return Response.json(await db.project.findMany({where:{userId:u.id},orderBy:{updatedAt:"desc"},include:{source:true,clips:{orderBy:{score:"desc"}}}}))}catch(e){if(e instanceof Error&&e.message==="UNAUTHENTICATED")return Response.json({error:"Unauthorized"},{status:401});throw e}}
-export async function POST(req:NextRequest){try{const u=await requireUser();const b=await req.json();const name=String(b.name??"Untitled project").trim().slice(0,120)||"Untitled project";const url=b.sourceUrl?String(b.sourceUrl).trim():null;const type=url&&/youtube\.com|youtu\.be/i.test(url)?"YOUTUBE":url&&/twitch\.tv/i.test(url)?"TWITCH":url&&/kick\.com/i.test(url)?"KICK":url&&/drive\.google\.com/i.test(url)?"GOOGLE_DRIVE":"URL";const categories=Array.isArray(b.categories)?b.categories.map(String).slice(0,8):["AI Detect"];const instructions=String(b.customInstructions??"").trim().slice(0,2000);const customInstructions=[categories.length?"Clip categories: "+categories.join(", "):"",instructions].filter(Boolean).join("\n\n")||null;const mode=b.mode==="LONG_FORM"?"LONG_FORM":"SHORTS";const language=String(b.outputLanguage??"en").slice(0,12);const p=await db.$transaction(async tx=>{const source=url?await tx.source.create({data:{userId:u.id,type,url,name}}):null;const project=await tx.project.create({data:{userId:u.id,name,sourceId:source?.id,mode,outputLanguage:language,customInstructions}});if(url)await tx.job.create({data:{userId:u.id,projectId:project.id,type:"INGEST",payload:{sourceUrl:url,categories,timeframe:b.timeframe??"full",rightsConfirmed:Boolean(b.rightsConfirmed)}}});return project});return Response.json(p,{status:201})}catch(e){if(e instanceof Error&&e.message==="UNAUTHENTICATED")return Response.json({error:"Unauthorized"},{status:401});throw e}}
+import { NextRequest } from "next/server";
+import { db } from "../../../lib/db";
+import { requireUser } from "../../../lib/auth";
+
+function parseSourceUrl(value: unknown): { url: string; type: "YOUTUBE" | "TWITCH" | "KICK" | "GOOGLE_DRIVE" | "URL" } | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string" || value.length > 2048) {
+    throw new Error("Enter a valid video URL.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    throw new Error("Enter a valid video URL.");
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error("Video URLs must use HTTP or HTTPS and must not contain embedded credentials.");
+  }
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const matches = (domain: string) => host === domain || host.endsWith("." + domain);
+  if (matches("youtube.com") || matches("youtu.be")) return { url: parsed.toString(), type: "YOUTUBE" };
+  if (matches("twitch.tv")) return { url: parsed.toString(), type: "TWITCH" };
+  if (matches("kick.com")) return { url: parsed.toString(), type: "KICK" };
+  if (matches("drive.google.com")) return { url: parsed.toString(), type: "GOOGLE_DRIVE" };
+  throw new Error("Unsupported source. Use a YouTube, Twitch, Kick, or Google Drive URL.");
+}
+
+export async function GET() {
+  try {
+    const user = await requireUser();
+    return Response.json(await db.project.findMany({
+      where: { userId: user.id },
+      orderBy: { updatedAt: "desc" },
+      include: { source: true, clips: { orderBy: { score: "desc" } } },
+    }));
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHENTICATED") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const user = await requireUser();
+    const body = await req.json();
+    if (body.rightsConfirmed !== true) {
+      return Response.json({ error: "Confirm that you have the rights to process this media." }, { status: 400 });
+    }
+
+    let parsedSource: ReturnType<typeof parseSourceUrl>;
+    try {
+      parsedSource = parseSourceUrl(body.sourceUrl);
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : "Invalid source URL." }, { status: 400 });
+    }
+
+    const name = String(body.name ?? "Untitled project").trim().slice(0, 120) || "Untitled project";
+    const categories = Array.isArray(body.categories) ? body.categories.map(String).slice(0, 8) : ["AI Detect"];
+    const instructions = String(body.customInstructions ?? "").trim().slice(0, 2000);
+    const customInstructions = [
+      categories.length ? "Clip categories: " + categories.join(", ") : "",
+      instructions,
+    ].filter(Boolean).join("\n\n") || null;
+    const mode = body.mode === "LONG_FORM" ? "LONG_FORM" : "SHORTS";
+    const language = String(body.outputLanguage ?? "en").slice(0, 12);
+
+    const project = await db.$transaction(async (tx) => {
+      const source = parsedSource
+        ? await tx.source.create({
+            data: { userId: user.id, type: parsedSource.type, url: parsedSource.url, name },
+          })
+        : null;
+      const created = await tx.project.create({
+        data: {
+          userId: user.id,
+          name,
+          sourceId: source?.id,
+          mode,
+          outputLanguage: language,
+          customInstructions,
+        },
+      });
+      if (parsedSource) {
+        await tx.job.create({
+          data: {
+            userId: user.id,
+            projectId: created.id,
+            type: "INGEST",
+            payload: {
+              sourceUrl: parsedSource.url,
+              categories,
+              timeframe: body.timeframe ?? "full",
+              rightsConfirmed: true,
+            },
+          },
+        });
+      }
+      return created;
+    });
+
+    return Response.json(project, { status: 201 });
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHENTICATED") {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    throw error;
+  }
+}
