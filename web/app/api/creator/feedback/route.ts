@@ -8,8 +8,8 @@ export async function GET() {
     return Response.json({
       ...profile,
       message: profile.active
-        ? "Personalized ranking is active. We learn only from explicit accepted/rejected clips and keep the score adjustment bounded."
-        : "Personalized ranking activates after at least three accepted and three rejected clips with feature data.",
+        ? "Personalized ranking is active. Accepted, exported, and published clips provide positive signals; rejected clips provide negative signals. Score adjustments remain bounded."
+        : "Personalized ranking activates after at least three positive clips (accepted/exported/published) and three rejected clips with feature data.",
     });
   } catch (error) {
     if (error instanceof Error && error.message === "UNAUTHENTICATED") {
