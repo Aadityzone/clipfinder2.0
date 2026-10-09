@@ -1,12 +1,85 @@
-import {db} from "./lib/db";import {loadCreatorFeedbackProfile} from "./lib/creator-feedback";import {claimNextJob,finishJob,failJob,assertJobNotCancelled} from "./lib/jobs";import path from "node:path";import{ensureLocalStorage,putFile}from"./lib/storage";import{downloadGoogleDrive}from"./lib/sources/google-drive";import{publishYouTube}from"./lib/publish/youtube";import{publishTikTok,tiktokPublishStatus}from"./lib/publish/tiktok";
+import {db} from "./lib/db";import {loadCreatorFeedbackProfile} from "./lib/creator-feedback";import {claimNextJob,finishJob,failJob,assertJobNotCancelled,completeJobAndEnqueue} from "./lib/jobs";import path from "node:path";import{ensureLocalStorage,putFile}from"./lib/storage";import{downloadGoogleDrive}from"./lib/sources/google-drive";import{publishYouTube}from"./lib/publish/youtube";import{publishTikTok,tiktokPublishStatus}from"./lib/publish/tiktok";
 const sleep=(n:number)=>new Promise(r=>setTimeout(r,n));const AI=process.env.AI_SERVICE_URL||"http://127.0.0.1:8000";
 async function ai(pathname:string,body:unknown){const r=await fetch(AI+pathname,{method:"POST",headers:{"content-type":"application/json",...(process.env.AI_SERVICE_SECRET?{"x-ai-secret":process.env.AI_SERVICE_SECRET}:{})},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
 async function queueDuePosts(){const due=await db.scheduledPost.findMany({where:{status:"SCHEDULED",scheduledFor:{lte:new Date()}},take:10});for(const post of due){const changed=await db.scheduledPost.updateMany({where:{id:post.id,status:"SCHEDULED"},data:{status:"PUBLISHING",error:null}});if(changed.count)await db.job.create({data:{userId:post.userId,type:"PUBLISH",projectId:post.clipId?((await db.clip.findUnique({where:{id:post.clipId},select:{projectId:true}}))?.projectId):undefined,payload:{scheduledPostId:post.id}}})}}
 async function tick(){await queueDuePosts();const j=await claimNextJob();if(!j)return;const heartbeat=setInterval(()=>{void db.job.updateMany({where:{id:j.id,status:{in:["RETRYING","ANALYZING"]}},data:{startedAt:new Date()}}).catch(error=>console.error("[worker] heartbeat failed",error));},30_000);heartbeat.unref?.();try{await db.job.update({where:{id:j.id},data:{progress:.02}});
  if(j.type==="PROJECT_READY"){await assertJobNotCancelled(j.id);await finishJob(j.id);return}
- if(j.type==="INGEST"){const p=j.payload as any;if(!p?.sourceUrl)throw new Error("Missing sourceUrl");const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});const source=await db.source.findUniqueOrThrow({where:{id:project.sourceId!}});const storageRoot=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage");let mediaPath:string;let metadata:any;let mimeType="video/mp4";if(source.type==="GOOGLE_DRIVE"){const match=p.sourceUrl.match(/(?:\/file\/d\/|[?&]id=)([A-Za-z0-9_-]+)/);if(!match)throw new Error("Invalid Google Drive file URL");const key="sources/google-drive/"+j.userId+"/"+match[1]+".media";mediaPath=path.resolve(storageRoot,key);const drive=await downloadGoogleDrive(j.userId,match[1],mediaPath);mimeType=String(drive.mimeType||mimeType);metadata=await ai("/v1/probe",{media_path:mediaPath});await assertJobNotCancelled(j.id);}else{const r=await ai("/v1/ingest",{url:p.sourceUrl,output_dir:path.join(storageRoot,"sources")});mediaPath=r.media_path;metadata=r.metadata;await assertJobNotCancelled(j.id);}const storageKey=path.relative(storageRoot,mediaPath).replaceAll("\\","/");await putFile(storageKey,mediaPath,mimeType);const a=await db.mediaAsset.create({data:{sourceId:source.id,storageKey,mimeType, durationS:metadata.duration,width:metadata.width,height:metadata.height,fps:metadata.fps,codec:metadata.codec,hasAudio:metadata.hasAudio}});await assertJobNotCancelled(j.id);await finishJob(j.id);await db.job.create({data:{userId:j.userId,projectId:j.projectId,type:"TRANSCRIBE",payload:{mediaAssetId:a.id,mediaPath}}});return}
- if(j.type==="TRANSCRIBE"){const p=j.payload as any;const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!},select:{outputLanguage:true}});const localMedia=await ensureLocalStorage((await db.mediaAsset.findUniqueOrThrow({where:{id:p.mediaAssetId}})).storageKey);const r=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined});await assertJobNotCancelled(j.id);const t=await db.transcript.create({data:{mediaAssetId:p.mediaAssetId,language:r.language,text:r.text,metadata:{duration:r.duration},segments:{create:r.segments.map((s:any)=>({startS:s.start,endS:s.end,text:s.text,confidence:s.confidence,words:{create:s.words.map((w:any)=>({startS:w.start,endS:w.end,word:w.word,confidence:w.confidence}))}}))}}});const proj=await db.project.findUniqueOrThrow({where:{id:j.projectId!},select:{mode:true}});await assertJobNotCancelled(j.id);await finishJob(j.id);await db.job.create({data:{userId:j.userId,projectId:j.projectId,type:proj.mode==="LONG_FORM"?"LONGFORM_ANALYZE":"ANALYZE",payload:{transcriptId:t.id}}});await db.usage.update({where:{userId:j.userId},data:{minutesAnalyzed:{increment:(r.duration||0)/60}}}).catch(()=>{});return}
- if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});const r=await ai("/v1/longform",{segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text}))});await assertJobNotCancelled(j.id);for(const c of r.stories){await db.clip.create({data:{projectId:project.id,startS:c.start,endS:c.end,score:c.score,category:"long_form_story",title:c.title,status:"CANDIDATE",metadata:{rationale:c.rationale}}})}const sourceAsset=project.sourceId?await db.mediaAsset.findFirst({where:{sourceId:project.sourceId}}):null;if(sourceAsset){const thumbKey="long-form/"+project.id+"/thumbnail.jpg";const thumbPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",thumbKey);await ai("/v1/thumbnail",{input_path:await ensureLocalStorage(sourceAsset.storageKey),output_path:thumbPath,time:Number(r.chapters?.[0]?.start||0)});await assertJobNotCancelled(j.id);await putFile(thumbKey,thumbPath,"image/jpeg");await db.longFormDocument.upsert({where:{projectId:project.id},create:{projectId:project.id,transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey},update:{transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey}});}await assertJobNotCancelled(j.id);await finishJob(j.id);return}
+ if(j.type==="INGEST"){
+  const p=j.payload as any;
+  if(!p?.sourceUrl)throw new Error("Missing sourceUrl");
+  const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});
+  const source=await db.source.findUniqueOrThrow({where:{id:project.sourceId!}});
+  const storageRoot=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage");
+  let asset=await db.mediaAsset.findFirst({where:{sourceId:source.id},orderBy:{createdAt:"desc"}});
+  if(!asset){
+    let mediaPath:string;
+    let metadata:any;
+    let mimeType="video/mp4";
+    if(source.type==="GOOGLE_DRIVE"){
+      const match=p.sourceUrl.match(/(?:\/file\/d\/|[?&]id=)([A-Za-z0-9_-]+)/);
+      if(!match)throw new Error("Invalid Google Drive file URL");
+      const key="sources/google-drive/"+j.userId+"/"+match[1]+".media";
+      mediaPath=path.resolve(storageRoot,key);
+      const drive=await downloadGoogleDrive(j.userId,match[1],mediaPath);
+      mimeType=String(drive.mimeType||mimeType);
+      metadata=await ai("/v1/probe",{media_path:mediaPath});
+    }else{
+      const result=await ai("/v1/ingest",{url:p.sourceUrl,output_dir:path.join(storageRoot,"sources")});
+      mediaPath=result.media_path;
+      metadata=result.metadata;
+    }
+    await assertJobNotCancelled(j.id);
+    const relative=path.relative(storageRoot,mediaPath);
+    if(relative===".."||relative.startsWith(".."+path.sep)||path.isAbsolute(relative)){
+      throw new Error("AI media path is outside shared MEDIA_STORAGE_ROOT. Configure the web worker and AI service to use the same mounted media directory.");
+    }
+    const storageKey=relative.replaceAll("\\","/");
+    await putFile(storageKey,mediaPath,mimeType);
+    asset=await db.mediaAsset.create({data:{
+      sourceId:source.id,storageKey,mimeType,durationS:metadata.duration,
+      width:metadata.width,height:metadata.height,fps:metadata.fps,
+      codec:metadata.codec,hasAudio:metadata.hasAudio,
+    }});
+  }
+  await assertJobNotCancelled(j.id);
+  await completeJobAndEnqueue(j.id,{
+    userId:j.userId,projectId:j.projectId,type:"TRANSCRIBE",
+    payload:{mediaAssetId:asset.id},
+  });
+  return;
+}
+if(j.type==="TRANSCRIBE"){
+  const p=j.payload as any;
+  const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!},select:{outputLanguage:true,mode:true}});
+  const asset=await db.mediaAsset.findUniqueOrThrow({where:{id:p.mediaAssetId}});
+  let transcript=await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId},orderBy:{createdAt:"desc"}});
+  let duration=Number((transcript?.metadata as any)?.duration||0);
+  if(!transcript){
+    const localMedia=await ensureLocalStorage(asset.storageKey);
+    const result=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined});
+    await assertJobNotCancelled(j.id);
+    transcript=await db.transcript.create({data:{
+      mediaAssetId:p.mediaAssetId,language:result.language,text:result.text,
+      metadata:{duration:result.duration},
+      segments:{create:result.segments.map((s:any)=>({
+        startS:s.start,endS:s.end,text:s.text,confidence:s.confidence,
+        words:{create:(s.words||[]).map((w:any)=>({
+          startS:w.start,endS:w.end,word:w.word,confidence:w.confidence,
+        }))},
+      }))},
+    }});
+    duration=Number(result.duration||0);
+    await db.usage.update({where:{userId:j.userId},data:{minutesAnalyzed:{increment:duration/60}}}).catch(()=>{});
+  }
+  await assertJobNotCancelled(j.id);
+  await completeJobAndEnqueue(j.id,{
+    userId:j.userId,projectId:j.projectId,
+    type:project.mode==="LONG_FORM"?"LONGFORM_ANALYZE":"ANALYZE",
+    payload:{transcriptId:transcript.id},
+  });
+  return;
+}
+if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});const r=await ai("/v1/longform",{segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text}))});await assertJobNotCancelled(j.id);for(const c of r.stories){await db.clip.create({data:{projectId:project.id,startS:c.start,endS:c.end,score:c.score,category:"long_form_story",title:c.title,status:"CANDIDATE",metadata:{rationale:c.rationale}}})}const sourceAsset=project.sourceId?await db.mediaAsset.findFirst({where:{sourceId:project.sourceId}}):null;if(sourceAsset){const thumbKey="long-form/"+project.id+"/thumbnail.jpg";const thumbPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",thumbKey);await ai("/v1/thumbnail",{input_path:await ensureLocalStorage(sourceAsset.storageKey),output_path:thumbPath,time:Number(r.chapters?.[0]?.start||0)});await assertJobNotCancelled(j.id);await putFile(thumbKey,thumbPath,"image/jpeg");await db.longFormDocument.upsert({where:{projectId:project.id},create:{projectId:project.id,transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey},update:{transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey}});}await assertJobNotCancelled(j.id);await finishJob(j.id);return}
  if(j.type==="ANALYZE"){const p=j.payload as any;const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});const categoryLine=(project.customInstructions||"").split("\n").find((x:string)=>x.startsWith("Clip categories:"))||"";const categories=categoryLine.replace("Clip categories:","").split(",").map((x:string)=>x.trim()).filter(Boolean);await db.job.update({where:{id:j.id},data:{progress:.9,status:"ANALYZING"}});const mediaAsset=await db.mediaAsset.findUniqueOrThrow({where:{id:t.mediaAssetId}});const feedback=await loadCreatorFeedbackProfile(j.userId);const r=await ai("/v1/analyze",{segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text})),instruction:project.customInstructions,categories,media_path:await ensureLocalStorage(mediaAsset.storageKey),creator_preferences:feedback.active?feedback.weights:{}});await assertJobNotCancelled(j.id);const analysis=await db.analysis.create({data:{projectId:project.id,model:"multimodal-heuristic-v2",version:"2.3.0",metadata:{candidateCount:r.candidates.length,creatorFeedback:{active:feedback.active,acceptedSamples:feedback.acceptedSamples,rejectedSamples:feedback.rejectedSamples,signalsLearned:Object.keys(feedback.weights).length}}}});for(const c of r.candidates){const h=await db.highlight.create({data:{analysisId:analysis.id,startS:c.start,endS:c.end,score:c.score,category:c.category,rationale:c.rationale,features:c.features}});await db.clip.create({data:{projectId:project.id,highlightId:h.id,startS:c.start,endS:c.end,score:c.score,category:c.category,status:"CANDIDATE"}})}await assertJobNotCancelled(j.id);await finishJob(j.id);return}
  if(j.type==="LONGFORM_RENDER"){const p=j.payload as any;const doc=await db.longFormDocument.findUniqueOrThrow({where:{id:p.documentId},include:{project:{include:{source:{include:{media:true}}}}}});const asset=doc.project.source?.media[0];if(!asset)throw new Error("Long-form source media missing");await db.longFormDocument.update({where:{id:doc.id},data:{renderStatus:"PROCESSING"}});const outputKey="long-form/"+doc.projectId+"/render-"+Date.now()+".mp4";const outputPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",outputKey);const tr=doc.transcriptId?await db.transcript.findUnique({where:{id:doc.transcriptId},include:{segments:true}}):null;const captions=(tr?.segments||[]).map((s:any)=>({start:Number(s.startS),end:Number(s.endS),text:s.text}));const mediaPath=await ensureLocalStorage(asset.storageKey);await ai("/v1/render",{input_path:mediaPath,output_path:outputPath,start:0,end:Number(asset.durationS||0),aspect:"16:9",segments:[{start:0,end:Number(asset.durationS||0)}],captions});await assertJobNotCancelled(j.id);await putFile(outputKey,outputPath,"video/mp4");await db.longFormDocument.update({where:{id:doc.id},data:{renderStatus:"READY",renderKey:outputKey}});await assertJobNotCancelled(j.id);await finishJob(j.id);return}
  if(j.type==="PUBLISH"){const p=j.payload as any;const post=await db.scheduledPost.findUniqueOrThrow({where:{id:p.scheduledPostId},include:{socialConnection:true,clip:{include:{renders:{where:{status:"READY"},orderBy:{createdAt:"desc"},take:1}}}}});if(!post.socialConnection||!post.clip?.renders[0])throw new Error("Publish prerequisites are not ready");const render=post.clip.renders[0];const filePath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",render.storageKey!);const meta=(post.metadata||{}) as any;const result=post.socialConnection.provider==="youtube"?await publishYouTube(j.userId,filePath,{title:String(meta.title||"Clip"),description:String(meta.description||""),privacyStatus:"private"}):await publishTikTok(j.userId,filePath,String(meta.title||"Clip"));if(post.socialConnection.provider==="tiktok"){await db.scheduledPost.update({where:{id:post.id},data:{status:"PUBLISHING",platformPostId:result.platformPostId,error:null}});await db.job.create({data:{userId:j.userId,projectId:post.clip?.projectId,type:"PUBLISH_STATUS",payload:{scheduledPostId:post.id},runAfter:new Date(Date.now()+30000)}});}else{await db.scheduledPost.update({where:{id:post.id},data:{status:"PUBLISHED",platformPostId:result.platformPostId,error:null}});}await db.creatorEvent.create({data:{userId:j.userId,projectId:post.clip?.projectId,event:"PUBLISH",metadata:{scheduledPostId:post.id,clipId:post.clipId,provider:post.socialConnection.provider,platformPostId:result.platformPostId}}});await assertJobNotCancelled(j.id);await finishJob(j.id);return}
