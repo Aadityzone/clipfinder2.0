@@ -3,15 +3,21 @@ import { db } from "./db";
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 
-export async function enqueueJob(userId: string, projectId: string, type: string, payload: unknown = {}, runAfter?: Date) {
+export async function enqueueJob(
+  userId: string,
+  projectId: string,
+  type: string,
+  payload: unknown = {},
+  runAfter?: Date,
+) {
   return db.job.create({
     data: { userId, projectId, type, payload: payload as any, status: "QUEUED", runAfter },
   });
 }
 
 /**
- * Atomically claim one runnable job. A worker crash leaves the job in RETRYING;
- * another worker can recover it after the stale lease expires.
+ * Atomically claim one runnable job. Heartbeats refresh startedAt while a worker
+ * is active; stale RETRYING/ANALYZING jobs can be recovered after a crash.
  */
 export async function claimNextJob() {
   const now = new Date();
@@ -19,7 +25,13 @@ export async function claimNextJob() {
   const runnable = { OR: [{ runAfter: null }, { runAfter: { lte: now } }] };
   const claimable = {
     AND: [
-      { OR: [\n        { status: "QUEUED" as const },\n        { status: "RETRYING" as const, startedAt: { lt: staleBefore } },\n        { status: "ANALYZING" as const, startedAt: { lt: staleBefore } },\n      ] },
+      {
+        OR: [
+          { status: "QUEUED" as const },
+          { status: "RETRYING" as const, startedAt: { lt: staleBefore } },
+          { status: "ANALYZING" as const, startedAt: { lt: staleBefore } },
+        ],
+      },
       runnable,
     ],
   };
@@ -40,8 +52,7 @@ export async function claimNextJob() {
   return claimed.count ? db.job.findUnique({ where: { id: candidate.id } }) : null;
 }
 
-/** Atomically mark a stage complete and enqueue its successor, so a worker crash
- * cannot leave the pipeline permanently between stages. */
+/** Atomically finish a stage and enqueue its successor to prevent pipeline gaps. */
 export async function completeJobAndEnqueue(
   id: string,
   next: { userId: string; projectId: string | null; type: string; payload: unknown },
@@ -64,7 +75,7 @@ export async function completeJobAndEnqueue(
   });
 }
 
-/** Throw at worker checkpoints so a cancellation is not overwritten by success/failure. */
+/** Throw at worker checkpoints so cancellation is not overwritten by completion. */
 export async function assertJobNotCancelled(id: string) {
   const job = await db.job.findUnique({ where: { id }, select: { status: true } });
   if (!job || job.status === "CANCELLED") {
