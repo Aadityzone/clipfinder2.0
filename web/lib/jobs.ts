@@ -19,7 +19,7 @@ export async function claimNextJob() {
   const runnable = { OR: [{ runAfter: null }, { runAfter: { lte: now } }] };
   const claimable = {
     AND: [
-      { OR: [{ status: "QUEUED" as const }, { status: "RETRYING" as const, startedAt: { lt: staleBefore } }] },
+      { OR: [\n        { status: "QUEUED" as const },\n        { status: "RETRYING" as const, startedAt: { lt: staleBefore } },\n        { status: "ANALYZING" as const, startedAt: { lt: staleBefore } },\n      ] },
       runnable,
     ],
   };
