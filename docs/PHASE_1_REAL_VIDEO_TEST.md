@@ -22,10 +22,10 @@ Only run the test if the VOD is publicly accessible and you have permission to p
 
 1. Apply the Prisma schema to the configured development database (this repo currently relies on schema push rather than a checked-in migration history):
 
-   \`\`\`bash
+   ```bash
    npx prisma db push --schema prisma/schema.prisma
    npm run prisma:generate
-   \`\`\`
+   ```
 2. Start the AI service from the repository root:
 
    ```bash
