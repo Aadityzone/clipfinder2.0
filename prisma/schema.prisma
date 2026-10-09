@@ -83,7 +83,7 @@ model User {
   templates Template[]
   notifications Notification[]
   events CreatorEvent[]
-  longFormDocument LongFormDocument?
+  exports Export[]
 }
 model Subscription {
   id String @id @default(cuid())
@@ -151,6 +151,7 @@ model Project {
   clips Clip[]
   favorites Favorite[]
   events CreatorEvent[]
+  longFormDocument LongFormDocument?
 }
 model Job {
   id String @id @default(cuid())
