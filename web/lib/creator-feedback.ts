@@ -105,7 +105,7 @@ export function buildCreatorFeedbackProfile(clips: FeedbackClip[]): CreatorFeedb
  */
 export async function loadCreatorFeedbackProfile(userId: string): Promise<CreatorFeedbackProfile> {
   const events = await db.creatorEvent.findMany({
-    where: { userId, event: { in: ["ACCEPT", "REJECT"] } },
+    where: { userId, event: { in: ["ACCEPT", "REJECT", "EXPORT", "PUBLISH"] } },
     orderBy: { createdAt: "desc" },
     take: 1000,
     select: { event: true, metadata: true },
@@ -116,7 +116,7 @@ export async function loadCreatorFeedbackProfile(userId: string): Promise<Creato
     const metadata = object(event.metadata);
     const clipId = typeof metadata.clipId === "string" ? metadata.clipId : "";
     if (!clipId || latestDecision.has(clipId)) continue;
-    latestDecision.set(clipId, event.event === "ACCEPT" ? "ACCEPT" : "REJECT");
+    latestDecision.set(clipId, event.event === "REJECT" ? "REJECT" : "ACCEPT");
   }
 
   if (latestDecision.size === 0) return buildCreatorFeedbackProfile([]);
