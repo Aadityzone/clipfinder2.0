@@ -220,6 +220,16 @@ They must not merely be stored and ignored.
 
 ---
 
+# Creator Feedback Learning
+
+Clip ranking can adapt to a creator's explicit clip decisions. The web worker builds a per-user preference profile from the latest ACCEPT/REJECT decision for each clip, using the original highlight feature snapshot. Later edits or renders do not erase that decision history.
+
+- Learning signals include face presence, scene changes, audio energy, visual change/motion, gameplay-like visuals, on-screen action cues, semantic score, hook density, and conversation turns.
+- Personalization remains off until there are at least **3 accepted and 3 rejected clips** with stored feature data.
+- Learned preferences apply a bounded **-5 to +5 point** adjustment to candidate scores; they do not replace the base AI ranking.
+- The authenticated `GET /api/creator/feedback` endpoint reports whether personalization is active, sample counts, and learned weights.
+- ACCEPT/REJECT decisions feed the profile; EDIT events are recorded for future analysis but do not count as accept/reject labels.
+
 # Job System
 
 Long-running operations must be represented as durable jobs.
