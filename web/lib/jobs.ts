@@ -22,14 +22,31 @@ export async function enqueueJob(
 export async function claimNextJob() {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
+  // A worker can disappear without reaching failJob (process kill, host
+  // restart, or power loss). Recover stale work, but do not retry a crashed
+  // job forever: the same three-attempt ceiling applies to crash recovery.
+  await db.job.updateMany({
+    where: {
+      status: { in: ["RETRYING", "ANALYZING"] },
+      startedAt: { lt: staleBefore },
+      attempts: { gte: MAX_ATTEMPTS },
+    },
+    data: {
+      status: "FAILED",
+      finishedAt: now,
+      runAfter: null,
+      error: "Worker stopped repeatedly while processing this job. Retry it manually after checking the service logs.",
+    },
+  });
+
   const runnable = { OR: [{ runAfter: null }, { runAfter: { lte: now } }] };
   const claimable = {
     AND: [
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: "RETRYING" as const, startedAt: { lt: staleBefore } },
-          { status: "ANALYZING" as const, startedAt: { lt: staleBefore } },
+          { status: "RETRYING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: "ANALYZING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,

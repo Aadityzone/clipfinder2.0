@@ -17,6 +17,7 @@ from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
+import hmac
 import os
 import uuid
 import importlib.util
@@ -69,7 +70,19 @@ class RenderRequest(BaseModel):
 
 def auth(secret: str | None):
     expected = os.getenv("AI_SERVICE_SECRET")
-    if expected and secret != expected:
+    production = (
+        os.getenv("ENVIRONMENT", "").lower() == "production"
+        or os.getenv("NODE_ENV", "").lower() == "production"
+    )
+    if not expected:
+        if production:
+            raise HTTPException(
+                status_code=503,
+                detail="AI service authentication is not configured",
+            )
+        # Local development remains convenient, but production fails closed.
+        return
+    if not secret or not hmac.compare_digest(secret, expected):
         raise HTTPException(status_code=401, detail="Invalid AI service credentials")
 
 @app.get("/health")
