@@ -31,7 +31,7 @@ export default function Editor({ projectId, mediaId, duration, clips }: {
   const [selected, setSelected] = useState<Clip | null>(clips[0] ?? null);
   const [segments, setSegments] = useState<Segment[]>(clips[0]?.edit?.segments ?? (clips[0] ? [{ startS: clips[0].startS, endS: clips[0].endS }] : []));
   const [selectedSegment, setSelectedSegment] = useState(0);
-  const [aspect, setAspect] = useState(clips[0]?.edit?.aspectRatio ?? "9:16");
+  const [aspect, setAspect] = useState(initialAspect);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
