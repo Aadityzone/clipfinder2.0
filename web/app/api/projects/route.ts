@@ -47,7 +47,17 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const user = await requireUser();
-    const body = await req.json();
+    let body: Record<string, unknown>;
+    try {
+      const parsed: unknown = await req.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return Response.json({ error: "Request body must be a JSON object." }, { status: 400 });
+      }
+      body = parsed as Record<string, unknown>;
+    } catch {
+      return Response.json({ error: "Request body must contain valid JSON." }, { status: 400 });
+    }
+
     if (body.rightsConfirmed !== true) {
       return Response.json({ error: "Confirm that you have the rights to process this media." }, { status: 400 });
     }
