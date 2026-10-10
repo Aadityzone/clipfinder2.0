@@ -2,6 +2,9 @@ import { db } from "./db";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
+const ACTIVE_JOB_STATUSES: Array<"RETRYING" | "DOWNLOADING" | "INGESTING" | "TRANSCRIBING" | "ANALYZING" | "EDITING" | "RENDERING"> = [
+  "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING",
+];
 
 export async function enqueueJob(
   userId: string,
@@ -27,7 +30,7 @@ export async function claimNextJob() {
   // job forever: the same three-attempt ceiling applies to crash recovery.
   await db.job.updateMany({
     where: {
-      status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] },
+      status: { in: ACTIVE_JOB_STATUSES },
       startedAt: { lt: staleBefore },
       attempts: { gte: MAX_ATTEMPTS },
     },
@@ -45,7 +48,7 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: ACTIVE_JOB_STATUSES }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
