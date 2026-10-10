@@ -28,12 +28,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const existing = await db.user.findUnique({ where: { email }, select: { id: true } });
-  if (existing) {
-    return Response.json({ error: "An account with that email already exists." }, { status: 409 });
-  }
-
   try {
+    const existing = await db.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) {
+      return Response.json({ error: "An account with that email already exists." }, { status: 409 });
+    }
+
     const user = await db.user.create({
       data: {
         email,
@@ -57,6 +57,11 @@ export async function POST(req: NextRequest) {
     ) {
       return Response.json({ error: "An account with that email already exists." }, { status: 409 });
     }
-    throw error;
+
+    console.error("Signup failed:", error);
+    return Response.json(
+      { error: "Signup is temporarily unavailable. Check the database connection and server logs, then try again." },
+      { status: 500 },
+    );
   }
 }
