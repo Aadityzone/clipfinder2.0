@@ -10,7 +10,7 @@ function dateParts(value: Date) {
 export default async function Calendar() {
   const user = await requireUser();
   const rows = await db.scheduledPost.findMany({ where: { userId: user.id }, orderBy: { scheduledFor: "asc" }, include: { clip: true, socialConnection: true } });
-  const upcoming = rows.filter(row => row.scheduledFor.getTime() >= Date.now() && ["SCHEDULED", "PUBLISHING"].includes(row.status)).length;
+  const upcoming = rows.filter(row => ["SCHEDULED", "PUBLISHING"].includes(row.status)).length;
   const published = rows.filter(row => row.status === "PUBLISHED").length;
   return <WorkspaceFrame active="/calendar" email={user.email} eyebrow="Publishing" title="Calendar" description="Track scheduled posts and the status returned by connected platforms." action={<span className="rounded-lg border border-white/[.08] bg-white/[.025] px-3 py-2 text-xs text-zinc-400">{rows.length} records</span>}>
     <div className="mb-5 grid gap-3 sm:grid-cols-3"><div className="rounded-xl border border-white/[.07] bg-[#10141a] p-4"><div className="text-[10px] uppercase tracking-wider text-zinc-600">All scheduled posts</div><div className="mt-2 text-2xl font-semibold">{rows.length}</div></div><div className="rounded-xl border border-white/[.07] bg-[#10141a] p-4"><div className="text-[10px] uppercase tracking-wider text-zinc-600">Upcoming / active</div><div className="mt-2 text-2xl font-semibold text-[#c4f36b]">{upcoming}</div></div><div className="rounded-xl border border-white/[.07] bg-[#10141a] p-4"><div className="text-[10px] uppercase tracking-wider text-zinc-600">Published</div><div className="mt-2 text-2xl font-semibold">{published}</div></div></div>
