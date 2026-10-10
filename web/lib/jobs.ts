@@ -17,7 +17,7 @@ export async function enqueueJob(
 
 /**
  * Atomically claim one runnable job. Heartbeats refresh startedAt while a worker
- * is active; stale RETRYING/ANALYZING jobs can be recovered after a crash.
+ * is active; stale jobs in any active processing stage can be recovered after a crash.
  */
 export async function claimNextJob() {
   const now = new Date();
@@ -45,7 +45,7 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] as const }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
