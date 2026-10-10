@@ -1,7 +1,5 @@
-import { access, mkdir } from "node:fs/promises";
-import { constants } from "node:fs";
-import path from "node:path";
 import { db } from "../../../lib/db";
+import { checkStorageHealth } from "../../../lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -33,9 +31,7 @@ async function checkAiService(): Promise<CheckStatus> {
 
 async function checkStorage(): Promise<CheckStatus> {
   try {
-    const root = path.resolve(process.env.MEDIA_STORAGE_ROOT || "../storage");
-    await mkdir(root, { recursive: true });
-    await access(root, constants.W_OK);
+    await checkStorageHealth();
     return "ok";
   } catch {
     return "unavailable";

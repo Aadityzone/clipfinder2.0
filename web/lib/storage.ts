@@ -1,11 +1,12 @@
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, stat, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { S3Client, GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { randomUUID } from "node:crypto";
+import { S3Client, GetObjectCommand, HeadObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
-export function storagePath(key:string){return path.join(storageRoot(),key.replace(/^[/\\]+/,""))}
+export function storagePath(key:string){return path.join(storageRoot(),key.replace(/^[/\\\\]+/,""))}
 export function isObjectStorage(){return (process.env.STORAGE_PROVIDER||"local").toLowerCase()==="s3"}
 function s3Config(){
   const bucket=process.env.S3_BUCKET;
@@ -19,6 +20,20 @@ function s3(){
     forcePathStyle:process.env.S3_FORCE_PATH_STYLE==="true",
     credentials:process.env.S3_ACCESS_KEY_ID&&process.env.S3_SECRET_ACCESS_KEY?{accessKeyId:process.env.S3_ACCESS_KEY_ID,secretAccessKey:process.env.S3_SECRET_ACCESS_KEY}:undefined,
   });
+}
+export async function checkStorageHealth():Promise<void>{
+  if(isObjectStorage()){
+    const {bucket}=s3Config();
+    const client=s3();
+    try{await client.send(new HeadBucketCommand({Bucket:bucket}));}
+    finally{client.destroy();}
+    return;
+  }
+  const root=storageRoot();
+  await mkdir(root,{recursive:true});
+  const probe=path.join(root,".health-"+randomUUID());
+  try{await writeFile(probe,"ok",{flag:"wx"});}
+  finally{await unlink(probe).catch(()=>{});}
 }
 export async function ensureStorage(){await mkdir(storageRoot(),{recursive:true})}
 export async function saveStream(key:string,stream:NodeJS.ReadableStream){
