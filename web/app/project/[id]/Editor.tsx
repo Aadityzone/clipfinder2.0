@@ -23,13 +23,16 @@ const clock = (seconds: number, tenths = false) => {
 const button = "inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-white/[.09] bg-white/[.025] px-3 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/[.07] disabled:cursor-not-allowed disabled:opacity-30";
 const panelLabel = "text-[10px] font-semibold uppercase tracking-[.16em] text-zinc-500";
 
-export default function Editor({ projectId, mediaId, duration, clips }: {
-  projectId: string; mediaId: string | null; duration: number; clips: Clip[];
+export default function Editor({ projectId, mediaId, duration, clips, favoriteIds = [] }: {
+  projectId: string; mediaId: string | null; duration: number; clips: Clip[]; favoriteIds?: string[];
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
+  const initialSegments = clips[0]?.edit?.segments ?? (clips[0] ? [{ startS: clips[0].startS, endS: clips[0].endS }] : []);
+  const initialAspect = clips[0]?.edit?.aspectRatio ?? "9:16";
+  const savedSignature = useRef(JSON.stringify({ id: clips[0]?.id ?? null, segments: initialSegments, aspectRatio: initialAspect }));
   const [selected, setSelected] = useState<Clip | null>(clips[0] ?? null);
-  const [segments, setSegments] = useState<Segment[]>(clips[0]?.edit?.segments ?? (clips[0] ? [{ startS: clips[0].startS, endS: clips[0].endS }] : []));
+  const [segments, setSegments] = useState<Segment[]>(initialSegments);
   const [selectedSegment, setSelectedSegment] = useState(0);
   const [aspect, setAspect] = useState(initialAspect);
   const [time, setTime] = useState(0);
