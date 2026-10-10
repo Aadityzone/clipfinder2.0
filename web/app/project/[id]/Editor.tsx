@@ -43,7 +43,9 @@ export default function Editor({ projectId, mediaId, duration, clips }: {
   const [future, setFuture] = useState<Segment[][]>([]);
   const [waveform, setWaveform] = useState<number[]>([]);
   const [captionStyle, setCaptionStyle] = useState({ font: "Arial", size: 48, color: "&H00FFFFFF" });
-  const [showShortcuts, setShowShortcuts] = useState(false);\n  const [favorites, setFavorites] = useState<string[]>(favoriteIds);\n  const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [favorites, setFavorites] = useState<string[]>(favoriteIds);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
   const selectedId = selected?.id;
   const current = segments[selectedSegment];
 
@@ -238,7 +240,20 @@ export default function Editor({ projectId, mediaId, duration, clips }: {
     } catch (error) { setMessage(error instanceof Error ? error.message : "Export failed"); }
   };
 
-  const toggleFavorite = async () => {\n    if (!selectedId || favoriteBusy) return;\n    setFavoriteBusy(true);\n    try {\n      const response = await fetch(`/api/clips/${selectedId}/favorite`, { method: "POST" });\n      const data = await response.json().catch(() => ({}));\n      if (!response.ok) throw new Error(data.error ?? "Could not update favorites.");\n      setFavorites(current => data.favorite ? [...new Set([...current, selectedId])] : current.filter(id => id !== selectedId));\n      setMessage(data.favorite ? "Added to favorites" : "Removed from favorites");\n    } catch (error) { setMessage(error instanceof Error ? error.message : "Favorite update failed"); }\n    finally { setFavoriteBusy(false); }\n  };\n\n  const clickTimeline = (event: MouseEvent<HTMLDivElement>) => {
+  const toggleFavorite = async () => {
+    if (!selectedId || favoriteBusy) return;
+    setFavoriteBusy(true);
+    try {
+      const response = await fetch(`/api/clips/${selectedId}/favorite`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error ?? "Could not update favorites.");
+      setFavorites(current => data.favorite ? [...new Set([...current, selectedId])] : current.filter(id => id !== selectedId));
+      setMessage(data.favorite ? "Added to favorites" : "Removed from favorites");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Favorite update failed"); }
+    finally { setFavoriteBusy(false); }
+  };
+
+  const clickTimeline = (event: MouseEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     seek(((event.clientX - rect.left) / Math.max(rect.width, 1)) * duration);
   };
@@ -251,7 +266,8 @@ export default function Editor({ projectId, mediaId, duration, clips }: {
       </div>
       <div className="flex items-center gap-2">
         <span className="hidden items-center gap-1.5 text-[10px] text-zinc-500 sm:inline-flex"><span className={`h-1.5 w-1.5 rounded-full ${saving ? "animate-pulse bg-amber-300" : "bg-emerald-300"}`}/>{saving ? "Saving" : "Autosaved"}</span>
-        <button className={button} onClick={toggleFavorite} disabled={!selected || favoriteBusy}>{favorites.includes(selectedId ?? "") ? "♥ Favorited" : "♡ Favorite"}</button>\n        <button className={button} onClick={() => setShowShortcuts(v => !v)}>⌘ Shortcuts</button>
+        <button className={button} onClick={toggleFavorite} disabled={!selected || favoriteBusy}>{favorites.includes(selectedId ?? "") ? "♥ Favorited" : "♡ Favorite"}</button>
+        <button className={button} onClick={() => setShowShortcuts(v => !v)}>⌘ Shortcuts</button>
         <button className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c4f36b] px-3.5 text-xs font-bold text-[#14190d] transition hover:brightness-110 disabled:opacity-40" onClick={render} disabled={!selected || saving || rendering}>{rendering ? "Queueing…" : "↗ Render clip"}</button>
       </div>
     </header>
