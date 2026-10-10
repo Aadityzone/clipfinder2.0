@@ -7,7 +7,7 @@ import { Upload } from "@aws-sdk/lib-storage";
 
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
 export function storagePath(key:string){
-  if(!key || key.includes("\\0"))throw new Error("Storage key must be a non-empty relative path");
+  if(!key || key.includes("\0"))throw new Error("Storage key must be a non-empty relative path");
   const root=storageRoot();
   const target=path.resolve(root,key);
   const relative=path.relative(root,target);
