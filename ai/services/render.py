@@ -33,6 +33,11 @@ def render(
         "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080:(iw-1920)*0.5:0",
     )
 
+    # Explicitly map the video and optionally map audio. Some valid source
+    # videos (for example, muted gameplay captures) contain no audio stream;
+    # requiring -af/-c:a without an audio stream makes FFmpeg fail those jobs.
+    stream_args = ["-map", "0:v:0", "-map", "0:a?"]
+
     def render_base(base_output: str):
         if len(segs) == 1:
             segment = segs[0]
@@ -40,9 +45,8 @@ def render(
             subprocess.run(
                 [
                     "ffmpeg", "-y", "-ss", str(segment["start"]), "-i", input_path,
-                    "-t", str(duration), "-vf", vf, "-c:v", "libx264",
-                    "-preset", "veryfast", "-crf", "20", "-af",
-                    "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac",
+                    "-t", str(duration), "-vf", vf, *stream_args, "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
                     "-movflags", "+faststart", base_output,
                 ],
                 check=True,
@@ -57,9 +61,8 @@ def render(
                 subprocess.run(
                     [
                         "ffmpeg", "-y", "-ss", str(segment["start"]), "-i", input_path,
-                        "-t", str(duration), "-vf", vf, "-c:v", "libx264",
-                        "-preset", "veryfast", "-crf", "20", "-af",
-                        "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac",
+                        "-t", str(duration), "-vf", vf, *stream_args, "-c:v", "libx264",
+                        "-preset", "veryfast", "-crf", "20", "-c:a", "aac",
                         "-movflags", "+faststart", part_path,
                     ],
                     check=True,
