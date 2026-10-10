@@ -9,7 +9,7 @@ function statusTone(status: string) {
   if (["QUEUED", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "RENDERING", "EDITING"].includes(status)) return "border-[#c4f36b]/20 bg-[#c4f36b]/[.07] text-[#d7f9a7]";
   return "border-white/10 bg-white/[.04] text-zinc-400";
 }
-const nav = [{ href: "/dashboard", label: "Overview", icon: "◫" }, { href: "/search", label: "Search", icon: "⌕" }, { href: "/favorites", label: "Favorites", icon: "♡" }, { href: "/exports", label: "Exports", icon: "↗" }, { href: "/analytics", label: "Analytics", icon: "⌁" }, { href: "/calendar", label: "Calendar", icon: "▦" }, { href: "/templates", label: "Templates", icon: "▤" }, { href: "/settings", label: "Settings", icon: "⚙" }];
+const nav = [{ href: "/dashboard", label: "Overview", icon: "◫" }, { href: "/search", label: "Search", icon: "⌕" }, { href: "/favorites", label: "Favorites", icon: "♡" }, { href: "/exports", label: "Exports", icon: "↗" }, { href: "/analytics", label: "Analytics", icon: "⌁" }, { href: "/calendar", label: "Calendar", icon: "▦" }, { href: "/templates", label: "Templates", icon: "▤" }, { href: "/usage", label: "Plan & usage", icon: "◉" }, { href: "/settings", label: "Connections", icon: "⚙" }, { href: "/profile", label: "Profile", icon: "◎" }];
 
 export default async function DashboardPage() {
   const u = await requireUser();
