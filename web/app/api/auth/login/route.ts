@@ -1,2 +1,45 @@
-import { NextRequest } from "next/server";import { db } from "../../../../lib/db";import { setSession,verifyPassword } from "../../../../lib/auth";
-export async function POST(req:NextRequest){const b=await req.json().catch(()=>({}));const email=String(b.email??"").trim().toLowerCase();const password=String(b.password??"");if(!/^\S+@\S+\.\S+$/.test(email)||password.length<8)return Response.json({error:"Invalid email or password."},{status:401});const u=await db.user.findUnique({where:{email}});if(!u)return Response.json({error:"Invalid email or password."},{status:401});if(u.lockedUntil&&u.lockedUntil.getTime()>Date.now())return Response.json({error:"Too many failed attempts. Try again later."},{status:429});if(!verifyPassword(password,u.passwordHash)){const attempts=u.failedLoginCount+1;await db.user.update({where:{id:u.id},data:{failedLoginCount:attempts,lockedUntil:attempts>=8?new Date(Date.now()+15*60*1000):null}});return Response.json({error:"Invalid email or password."},{status:401});}await db.user.update({where:{id:u.id},data:{failedLoginCount:0,lockedUntil:null}});await setSession(u.id);return Response.json({user:{id:u.id,email:u.email,name:u.name}})}
+import { NextRequest } from "next/server";
+import { db } from "../../../../lib/db";
+import { setSession, verifyPassword } from "../../../../lib/auth";
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function POST(req: NextRequest) {
+  const parsed = await req.json().catch(() => null);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return Response.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+
+  const body = parsed as Record<string, unknown>;
+  const email = String(body.email ?? "").trim().toLowerCase();
+  const password = String(body.password ?? "");
+  if (email.length > 254 || !EMAIL_PATTERN.test(email) || password.length < 8 || password.length > 1024) {
+    return Response.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+
+  const user = await db.user.findUnique({ where: { email } });
+  if (!user) return Response.json({ error: "Invalid email or password." }, { status: 401 });
+
+  if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+    return Response.json({ error: "Too many failed attempts. Try again later." }, { status: 429 });
+  }
+
+  if (!verifyPassword(password, user.passwordHash)) {
+    const attempts = user.failedLoginCount + 1;
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginCount: attempts,
+        lockedUntil: attempts >= 8 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+      },
+    });
+    return Response.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+
+  await db.user.update({
+    where: { id: user.id },
+    data: { failedLoginCount: 0, lockedUntil: null },
+  });
+  await setSession(user.id);
+  return Response.json({ user: { id: user.id, email: user.email, name: user.name } });
+}
