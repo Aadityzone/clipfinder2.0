@@ -17,29 +17,37 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Invalid email or password." }, { status: 401 });
   }
 
-  const user = await db.user.findUnique({ where: { email } });
-  if (!user) return Response.json({ error: "Invalid email or password." }, { status: 401 });
+  try {
+    const user = await db.user.findUnique({ where: { email } });
+    if (!user) return Response.json({ error: "Invalid email or password." }, { status: 401 });
 
-  if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
-    return Response.json({ error: "Too many failed attempts. Try again later." }, { status: 429 });
-  }
+    if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      return Response.json({ error: "Too many failed attempts. Try again later." }, { status: 429 });
+    }
 
-  if (!verifyPassword(password, user.passwordHash)) {
-    const attempts = user.failedLoginCount + 1;
+    if (!verifyPassword(password, user.passwordHash)) {
+      const attempts = user.failedLoginCount + 1;
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginCount: attempts,
+          lockedUntil: attempts >= 8 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+        },
+      });
+      return Response.json({ error: "Invalid email or password." }, { status: 401 });
+    }
+
     await db.user.update({
       where: { id: user.id },
-      data: {
-        failedLoginCount: attempts,
-        lockedUntil: attempts >= 8 ? new Date(Date.now() + 15 * 60 * 1000) : null,
-      },
+      data: { failedLoginCount: 0, lockedUntil: null },
     });
-    return Response.json({ error: "Invalid email or password." }, { status: 401 });
+    await setSession(user.id);
+    return Response.json({ user: { id: user.id, email: user.email, name: user.name } });
+  } catch (error) {
+    console.error("Login failed:", error);
+    return Response.json(
+      { error: "Sign-in is temporarily unavailable. Check the database connection and server logs, then try again." },
+      { status: 500 },
+    );
   }
-
-  await db.user.update({
-    where: { id: user.id },
-    data: { failedLoginCount: 0, lockedUntil: null },
-  });
-  await setSession(user.id);
-  return Response.json({ user: { id: user.id, email: user.email, name: user.name } });
 }
