@@ -21,6 +21,7 @@ jobs:
       - run: npm run prisma:generate
       - run: npx prisma validate --schema prisma/schema.prisma
       - run: npm run typecheck
+      - run: npm run test:storage
       - run: npm run lint
       - run: npm run build
 
