@@ -67,10 +67,13 @@ export default function Editor({ projectId, mediaId, duration, clips }: {
   const pct = useCallback((value: number) => duration > 0 ? Math.min(100, Math.max(0, value / duration * 100)) : 0, [duration]);
 
   const selectClip = (clip: Clip) => {
+    const nextSegments = clip.edit?.segments ?? [{ startS: clip.startS, endS: clip.endS }];
+    const nextAspect = clip.edit?.aspectRatio ?? "9:16";
+    savedSignature.current = JSON.stringify({ id: clip.id, segments: nextSegments, aspectRatio: nextAspect });
     setSelected(clip);
-    setSegments(clip.edit?.segments ?? [{ startS: clip.startS, endS: clip.endS }]);
+    setSegments(nextSegments);
     setSelectedSegment(0);
-    setAspect(clip.edit?.aspectRatio ?? "9:16");
+    setAspect(nextAspect);
     setHistory([]); setFuture([]); setMessage(""); setRenderId(null); setRenderStatus(null);
   };
 
