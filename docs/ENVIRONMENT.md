@@ -1,9 +1,9 @@
 # Environment
 ## Web
-Create `web/.env.local` with `DATABASE_URL`, `AUTH_SECRET`, `AI_SERVICE_URL`, `AI_SERVICE_SECRET`, and `MEDIA_STORAGE_ROOT`.
+Create `web/.env.local` with `DATABASE_URL`, `AUTH_SECRET`, `AI_SERVICE_URL`, `AI_SERVICE_SECRET`, and `MEDIA_STORAGE_ROOT`. For local development, use `MEDIA_STORAGE_ROOT=../storage` in this file; Next.js and the workspace worker run from `web/`, so this resolves to the repository's `storage/` directory.
 ## AI
-Create `ai/.env` with `AI_SERVICE_SECRET`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, and `MEDIA_STORAGE_ROOT`.
-Never commit real secrets. The AI service can run locally without a secret. In production, set `AI_SERVICE_SECRET` and `NODE_ENV=production` (or `ENVIRONMENT=production`); authenticated AI endpoints fail closed with HTTP 503 if the secret is missing and compare supplied secrets in constant time. The web and AI service must use the same secret.
+Create `ai/.env` with `AI_SERVICE_SECRET`, `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, and `MEDIA_STORAGE_ROOT`. When starting Uvicorn from the repository root, use `MEDIA_STORAGE_ROOT=./storage` in this file so it resolves to the same repository `storage/` directory.
+Start the AI service from the repository root with `uvicorn ai.main:app --host 127.0.0.1 --port 8000 --env-file ai/.env`; without `--env-file`, Uvicorn does not automatically load `ai/.env`. For local web commands, create `web/.env.local`; `prisma.config.ts` explicitly loads that file for Prisma CLI commands. Never commit real secrets. The AI service can run locally without a secret. In production, set `AI_SERVICE_SECRET` and `NODE_ENV=production` (or `ENVIRONMENT=production`); authenticated AI endpoints fail closed with HTTP 503 if the secret is missing and compare supplied secrets in constant time. The web and AI service must use the same secret.
 
 
 ## Publishing integrations
@@ -32,3 +32,24 @@ Stripe billing is implemented but remains inactive until `STRIPE_SECRET_KEY`, `S
 ## Runtime health checks
 
 The web health endpoint at `GET /api/health` checks PostgreSQL connectivity, the Python AI service `/health` endpoint, and write access to the configured local working-storage directory. It returns HTTP 200 only when all three checks pass, otherwise HTTP 503 with dependency statuses only (never credentials or filesystem paths).
+
+## Local development commands
+
+Run these from the repository root in separate terminals:
+
+```powershell
+# Apply the current schema to your configured development database
+npx prisma db push --schema prisma/schema.prisma
+npm run prisma:generate
+
+# Terminal 1: AI service (loads ai/.env)
+uvicorn ai.main:app --host 127.0.0.1 --port 8000 --env-file ai/.env
+
+# Terminal 2: website
+npm run dev
+
+# Terminal 3: durable background worker
+npm --workspace web run worker
+```
+
+Keep the web and AI `AI_SERVICE_SECRET` values identical. The web and AI processes must share the same media directory when local storage is selected. Do not paste or commit either environment file.
