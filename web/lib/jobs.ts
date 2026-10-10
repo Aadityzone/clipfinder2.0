@@ -2,6 +2,9 @@ import { db } from "./db";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
+const ACTIVE_JOB_STATUSES: Array<"RETRYING" | "DOWNLOADING" | "INGESTING" | "TRANSCRIBING" | "ANALYZING" | "EDITING" | "RENDERING"> = [
+  "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING",
+];
 
 export async function enqueueJob(
   userId: string,
@@ -17,7 +20,7 @@ export async function enqueueJob(
 
 /**
  * Atomically claim one runnable job. Heartbeats refresh startedAt while a worker
- * is active; stale RETRYING/ANALYZING jobs can be recovered after a crash.
+ * is active; stale jobs in any active processing stage can be recovered after a crash.
  */
 export async function claimNextJob() {
   const now = new Date();
@@ -27,7 +30,7 @@ export async function claimNextJob() {
   // job forever: the same three-attempt ceiling applies to crash recovery.
   await db.job.updateMany({
     where: {
-      status: { in: ["RETRYING", "ANALYZING"] },
+      status: { in: ACTIVE_JOB_STATUSES },
       startedAt: { lt: staleBefore },
       attempts: { gte: MAX_ATTEMPTS },
     },
@@ -45,8 +48,7 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: "RETRYING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
-          { status: "ANALYZING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: ACTIVE_JOB_STATUSES }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
