@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "../../../lib/auth";
 import { db } from "../../../lib/db";
 import Editor from "./Editor";
+import RefreshWhenProcessing from "../../../components/RefreshWhenProcessing";
 
 function time(s: number) { return new Date(s * 1000).toISOString().slice(11, 19); }
 function stateClass(status: string) {
@@ -20,7 +21,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const asset = project.source?.media[0] ?? null;
   const active = project.jobs.some(j => !["READY", "FAILED", "CANCELLED"].includes(j.status));
   const latest = project.jobs[0];
-  return <main className="min-h-screen bg-[#080a0d] px-4 pb-12 text-white sm:px-6">
+  return <main className="min-h-screen bg-[#080a0d] px-4 pb-12 text-white sm:px-6"><RefreshWhenProcessing active={active}/>
     <header className="mx-auto flex max-w-[1500px] items-center justify-between border-b border-white/[.07] py-5"><Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-zinc-400 transition hover:text-white">← <span>Workspace</span></Link><Link href="/" className="font-semibold tracking-tight">clip<span className="text-[#c4f36b]">finder</span><span className="ml-1 text-[10px] text-zinc-600">2.0</span></Link><Link href={"/project/"+project.id+"/long-form"} className="cf-button-secondary !min-h-9 !rounded-[10px] !px-3 text-xs">Long-form workspace ↗</Link></header>
     <div className="mx-auto max-w-[1500px] pt-8">
       <div className="cf-enter flex flex-col justify-between gap-5 xl:flex-row xl:items-end"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="cf-kicker">Project workspace</span><span className={`rounded-full border px-2.5 py-1 text-[10px] ${stateClass(latest?.status ?? "READY")}`}>{(latest?.status ?? "READY").replaceAll("_"," ")}</span></div><h1 className="mt-3 break-words text-3xl font-semibold tracking-[-.045em] sm:text-4xl">{project.name}</h1><p className="mt-2 max-w-3xl truncate text-sm text-zinc-500">{project.source?.url ?? project.source?.name ?? "Uploaded source"}{asset?.durationS ? " · " + time(asset.durationS) : ""}</p></div><div className="flex flex-wrap gap-2"><span className="rounded-xl border border-white/[.08] bg-white/[.025] px-3 py-2 text-xs text-zinc-400">{project.mode === "SHORTS" ? "Vertical shorts" : "Long form"}</span><span className="rounded-xl border border-white/[.08] bg-white/[.025] px-3 py-2 text-xs text-zinc-400">Transcript: {project.outputLanguage.toUpperCase()}</span></div></div>
