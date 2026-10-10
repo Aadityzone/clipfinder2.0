@@ -6,7 +6,16 @@ import { S3Client, GetObjectCommand, HeadObjectCommand, HeadBucketCommand } from
 import { Upload } from "@aws-sdk/lib-storage";
 
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
-export function storagePath(key:string){return path.join(storageRoot(),key.replace(/^[/\\\\]+/,""))}
+export function storagePath(key:string){
+  if(!key || key.includes("\0"))throw new Error("Storage key must be a non-empty relative path");
+  const root=storageRoot();
+  const target=path.resolve(root,key);
+  const relative=path.relative(root,target);
+  if(!relative||relative===".."||relative.startsWith(".."+path.sep)||path.isAbsolute(relative)){
+    throw new Error("Storage key must stay within MEDIA_STORAGE_ROOT");
+  }
+  return target;
+}
 export function isObjectStorage(){return (process.env.STORAGE_PROVIDER||"local").toLowerCase()==="s3"}
 function s3Config(){
   const bucket=process.env.S3_BUCKET;
