@@ -15,7 +15,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const user = await requireUser();
   const { id } = await params;
   const project = await db.project.findFirst({ where: { id, userId: user.id }, include: { source: { include: { media: true } }, jobs: { orderBy: { createdAt: "desc" }, take: 8 }, clips: { orderBy: { score: "desc" }, include: { edit: true, highlight: true } } } });
-  if (!project) return <main className="min-h-screen bg-[#080a0d] p-8 text-white"><div className="mx-auto max-w-3xl cf-card p-8"><p className="cf-kicker">Project unavailable</p><h1 className="mt-3 text-2xl font-semibold">We couldn't find this project.</h1><p className="mt-2 text-sm text-zinc-500">It may have been removed or belong to another account.</p><Link href="/dashboard" className="cf-button mt-6">Back to workspace</Link></div></main>;
+  if (!project) return <main className="min-h-screen bg-[#080a0d] p-8 text-white"><div className="mx-auto max-w-3xl cf-card p-8"><p className="cf-kicker">Project unavailable</p><h1 className="mt-3 text-2xl font-semibold">We could not find this project.</h1><p className="mt-2 text-sm text-zinc-500">It may have been removed or belong to another account.</p><Link href="/dashboard" className="cf-button mt-6">Back to workspace</Link></div></main>;
   const favoriteRows = await db.favorite.findMany({ where: { userId: user.id, projectId: project.id, clipId: { not: null } }, select: { clipId: true } });
   const favoriteIds = favoriteRows.map(row => row.clipId).filter((clipId): clipId is string => Boolean(clipId));
   const asset = project.source?.media[0] ?? null;
