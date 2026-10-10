@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "../../lib/auth";
 import { db } from "../../lib/db";
+import RefreshWhenProcessing from "../../components/RefreshWhenProcessing";
 
 function fmt(d: Date) { return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }); }
 function statusTone(status: string) {
@@ -15,7 +16,8 @@ export default async function DashboardPage() {
   const u = await requireUser();
   const projects = await db.project.findMany({ where: { userId: u.id }, orderBy: { updatedAt: "desc" }, include: { source: true, clips: { orderBy: { score: "desc" }, take: 1 }, jobs: { orderBy: { createdAt: "desc" }, take: 1 } } });
   const [usage, totalClips] = await Promise.all([db.usage.findUnique({ where: { userId: u.id } }), db.clip.count({ where: { project: { userId: u.id } } })]);
-  return <main className="min-h-screen bg-[#080a0d] text-white">
+  const hasActiveJobs = projects.some(p => p.jobs[0] && !["READY", "FAILED", "CANCELLED"].includes(p.jobs[0].status));
+  return <main className="min-h-screen bg-[#080a0d] text-white"><RefreshWhenProcessing active={hasActiveJobs}/>
     <aside className="fixed inset-y-0 left-0 z-20 hidden w-[248px] flex-col border-r border-white/[.07] bg-[#0b0f14] px-4 py-5 lg:flex">
       <Link href="/" className="mb-9 flex items-center gap-2.5 px-2 font-semibold tracking-tight"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-[#c4f36b] text-[#12180a]">▶</span><span>clip<span className="text-[#c4f36b]">finder</span><span className="ml-1 text-[10px] text-zinc-600">2.0</span></span></Link>
       <div className="px-3 pb-3 text-[10px] font-bold tracking-[.18em] text-zinc-600">WORKSPACE</div><nav className="space-y-1" aria-label="Workspace">{nav.slice(0, 5).map(n => <Link key={n.href} href={n.href} aria-current={n.href === "/dashboard" ? "page" : undefined} className="cf-sidebar-link"><span className="w-5 text-center text-base">{n.icon}</span>{n.label}</Link>)}</nav>
