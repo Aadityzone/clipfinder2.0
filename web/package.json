@@ -7,7 +7,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "worker": "tsx worker.ts"
+    "worker": "tsx worker.ts",
+    "test:storage": "tsx --test lib/storage.test.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.0.0",
