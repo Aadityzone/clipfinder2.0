@@ -87,7 +87,18 @@ def auth(secret: str | None):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "ai", "version": "2.2.0"}
+    dependencies = {
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffprobe": shutil.which("ffprobe") is not None,
+        "yt_dlp": shutil.which("yt-dlp") is not None,
+    }
+    ready = all(dependencies.values())
+    return {
+        "ok": ready,
+        "service": "ai",
+        "version": "2.2.0",
+        "dependencies": dependencies,
+    }
 
 @app.post("/v1/ingest", response_model=IngestResponse)
 def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
