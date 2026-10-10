@@ -111,39 +111,39 @@ export default function Editor({ projectId, mediaId, duration, clips, favoriteId
     setFuture([]);
     setSegments(next);
   };
-  const trimIn = useCallback(() => {
+  const trimIn = () => {
     if (!current) return;
     push(segments.map((s, i) => i === selectedSegment ? { ...s, startS: Math.max(s.startS, Math.min(time, s.endS - .1)) } : s));
-  }, [current, segments, selectedSegment, time]);
-  const trimOut = useCallback(() => {
+  };
+  const trimOut = () => {
     if (!current) return;
     push(segments.map((s, i) => i === selectedSegment ? { ...s, endS: Math.min(s.endS, Math.max(time, s.startS + .1)) } : s));
-  }, [current, segments, selectedSegment, time]);
-  const split = useCallback(() => {
+  };
+  const split = () => {
     if (!current) return;
     const cut = Math.max(current.startS + .1, Math.min(current.endS - .1, time));
     if (cut <= current.startS || cut >= current.endS) { setMessage("Move the playhead inside the selected segment to split it."); return; }
     push([...segments.slice(0, selectedSegment), { startS: current.startS, endS: cut }, { startS: cut, endS: current.endS }, ...segments.slice(selectedSegment + 1)]);
     setSelectedSegment(selectedSegment + 1);
     setMessage("Segment split.");
-  }, [current, segments, selectedSegment, time]);
-  const removeSegment = useCallback(() => {
+  };
+  const removeSegment = () => {
     if (segments.length <= 1) return;
     push(segments.filter((_, i) => i !== selectedSegment));
     setSelectedSegment(Math.min(selectedSegment, segments.length - 2));
-  }, [segments, selectedSegment]);
-  const undo = useCallback(() => {
+  };
+  const undo = () => {
     const previous = history.at(-1);
     if (!previous) return;
     setFuture(f => [segments, ...f]); setSegments(previous);
     setSelectedSegment(i => Math.min(i, previous.length - 1)); setHistory(h => h.slice(0, -1));
-  }, [history, segments]);
-  const redo = useCallback(() => {
+  };
+  const redo = () => {
     const next = future[0];
     if (!next) return;
     setHistory(h => [...h, segments]); setSegments(next);
     setSelectedSegment(i => Math.min(i, next.length - 1)); setFuture(f => f.slice(1));
-  }, [future, segments]);
+  };
 
   const save = useCallback(async () => {
     if (!selectedId || !segments.length) return false;
