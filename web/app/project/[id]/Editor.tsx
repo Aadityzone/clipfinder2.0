@@ -52,20 +52,6 @@ export default function Editor({ projectId, mediaId, duration, clips, favoriteId
   const selectedId = selected?.id;
   const current = segments[selectedSegment];
 
-  useEffect(() => {
-    if (!selectedId && clips[0]) {
-      const first = clips[0];
-      const nextSegments = first.edit?.segments ?? [{ startS: first.startS, endS: first.endS }];
-      const nextAspect = first.edit?.aspectRatio ?? "9:16";
-      savedSignature.current = JSON.stringify({ id: first.id, segments: nextSegments, aspectRatio: nextAspect });
-      setSelected(first); setSegments(nextSegments); setAspect(nextAspect); setSelectedSegment(0);
-      return;
-    }
-    if (selectedId) {
-      const latest = clips.find(clip => clip.id === selectedId);
-      if (latest) setSelected(latest);
-    }
-  }, [clips, selectedId]);
   const clipDuration = useMemo(() => segments.reduce((sum, segment) => sum + segment.endS - segment.startS, 0), [segments]);
   const pct = useCallback((value: number) => duration > 0 ? Math.min(100, Math.max(0, value / duration * 100)) : 0, [duration]);
 
