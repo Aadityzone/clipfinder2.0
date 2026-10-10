@@ -27,7 +27,7 @@ export async function claimNextJob() {
   // job forever: the same three-attempt ceiling applies to crash recovery.
   await db.job.updateMany({
     where: {
-      status: { in: ["RETRYING", "ANALYZING"] },
+      status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] },
       startedAt: { lt: staleBefore },
       attempts: { gte: MAX_ATTEMPTS },
     },
@@ -45,8 +45,7 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: "RETRYING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
-          { status: "ANALYZING" as const, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: ["RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] as const }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
