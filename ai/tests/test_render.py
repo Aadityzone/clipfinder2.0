@@ -127,3 +127,19 @@ def test_render_propagates_ffmpeg_timeout_for_worker_failure_handling(tmp_path):
     ):
         with pytest.raises(subprocess.TimeoutExpired):
             render(input_path=str(tmp_path / "source.mp4"), output_path=str(output), start=0, end=4)
+
+
+def test_every_ffmpeg_stage_has_a_bounded_timeout(tmp_path):
+    from ai.services.render import FFMPEG_TIMEOUT_SECONDS
+
+    output = tmp_path / "clip.mp4"
+    with patch("ai.services.render.subprocess.run") as run:
+        render(
+            input_path=str(tmp_path / "source.mp4"),
+            output_path=str(output),
+            segments=[{"start": 0, "end": 2}, {"start": 5, "end": 8}],
+            captions=[{"start": 0, "end": 1, "text": "Caption"}],
+        )
+
+    assert run.call_count == 4
+    assert all(call.kwargs.get("timeout") == FFMPEG_TIMEOUT_SECONDS for call in run.call_args_list)
