@@ -81,3 +81,10 @@ On a legal, accessible test video:
 - Added tests for the smoke runner's endpoint order and fail-closed behavior when analysis returns no candidates.
 - Latest fully green CI head before the smoke runner was `11da6b4`: Python and web jobs passed. The smoke-runner commits are currently under fresh CI and must be rechecked.
 - Real source download, live model execution, Prisma-backed worker transitions, and authenticated web export remain unverified until the smoke script is run against configured services and a permitted source URL.
+
+
+## Storage upload atomicity (2026-10-12)
+- `saveStream` now writes to a unique temporary sibling file and publishes the final local path only after the stream completes.
+- When S3/object storage is configured, the completed temporary file is uploaded to the durable object key before the local cache is replaced. A failed stream or S3 write must not expose a partial new file as the final local object.
+- Added a regression test that interrupts a stream and checks that neither the final path nor a temporary artifact remains.
+- CI for this storage hardening is pending on the current branch head; the latest commit must pass web typecheck, storage tests, lint and build before this is considered verified.
