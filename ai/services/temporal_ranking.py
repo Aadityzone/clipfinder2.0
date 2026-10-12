@@ -80,6 +80,14 @@ def _multimodal_signal(features: dict) -> tuple[float | None, int, list[str]]:
         values.append(_clamp(0.60 * _clamp(visual_change or 0) + 0.40 * _clamp(motion or 0)))
         modalities.add("visual")
 
+    scene_count = _finite(features.get("sceneChangeCount"))
+    if scene_count is None:
+        scene_count = _finite(features.get("sceneHits"))
+    if scene_count is not None:
+        # Scene cuts can mark transitions, but excessive cuts are not semantic quality.
+        values.append(_clamp(scene_count / 5.0))
+        modalities.add("scene")
+
     labels = features.get("onScreenActionLabels")
     labels = labels if isinstance(labels, list) else []
     text = features.get("onScreenText")
