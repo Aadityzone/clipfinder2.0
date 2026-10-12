@@ -54,3 +54,12 @@ On a legal, accessible test video:
 6. Confirm clips/highlights persist and appear in the authenticated workspace.
 7. Render at least one clip; verify actual output file exists and can be decoded/played.
 8. Confirm job terminal state, error semantics, usage increment and downloadable export.
+
+
+## Labelled benchmark runner (2026-10-12)
+- Added `ai/services/benchmark.py`, a CLI that validates a versioned manifest of human-curated source-video labels, evaluates original candidate order and deterministic reranking, and emits JSON metrics.
+- Metrics are calculated independently per source video before averaging by genre; timestamps from different videos are never compared. The runner rejects duplicate IDs, invalid intervals, missing labels, and unsupported manifest versions rather than silently skipping bad data.
+- Added `ai/tests/test_benchmark.py` for manifest validation and per-video/per-genre aggregation.
+- Added `docs/project-tracker/AI_BENCHMARKING.md` with the schema, command, and methodology.
+- Latest GitHub Actions run for PR #18 head `d5f9ec6` completed successfully: Python and web jobs both succeeded. This is CI evidence only; it is not a real-video end-to-end result.
+- Still no curated label dataset checked into the repository. Benchmark runner correctness is testable, but ranking quality is not established until real labelled videos are supplied.
