@@ -89,7 +89,7 @@ def _candidate_features(cluster: list[tuple[float, float, str, dict]]) -> dict:
     peaks = [_number(payload["audioPeakDb"]) for payload in payloads
              if payload.get("audioPeakDb") is not None]
     if peaks:
-        features["audioPeakDb"] = round(min(peaks), 2)
+        features["audioPeakDb"] = round(max(peaks), 2)
 
     labels = sorted({str(label) for payload in payloads
                      for label in (payload.get("onScreenActionLabels") or [])})
@@ -137,7 +137,18 @@ def generate_event_candidates(media: dict | None, instruction: str | None = None
     semantic_rows = media.get("visualSemantic", []) or []
 
     events: list[tuple[float, float, str, dict]] = []
-    audio_peaks = _peak_rows(audio_rows, "energy", "start")
+    audio_peaks = []
+    for row in audio_rows:
+        if not isinstance(row, dict):
+            continue
+        row_start = _number(row.get("start"), -1)
+        row_end = _number(row.get("end"), -1)
+        energy = _number(row.get("energy"))
+        if row_start < 0 or row_end <= row_start or energy <= 0:
+            continue
+        # Center events inside their measured energy window rather than anchoring
+        # every proposed clip to the window's leading edge.
+        audio_peaks.append(((row_start + row_end) / 2, energy, row))
     if audio_peaks:
         values = sorted(value for _, value, _ in audio_peaks)
         threshold = values[max(0, int((len(values) - 1) * 0.70))]
