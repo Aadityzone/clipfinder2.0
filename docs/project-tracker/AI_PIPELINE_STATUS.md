@@ -50,3 +50,5 @@ On a legal, accessible test video:
 - Added focused tests in `ai/tests/test_event_candidates.py` for audio-only and visual/on-screen signals, short media bounds, absent data, and semantic-category non-fabrication.
 - Change under review: [PR #18](https://github.com/Aadityzone/clipfinder2.0/pull/18). The latest GitHub Actions run is pending; no pass is claimed.
 - Limits: event signals are candidate proposals, not semantic understanding. Current audio-energy, motion, scene and OCR heuristics need validation against labelled cross-genre videos. No live video or end-to-end persisted/exported clip has been tested by this patch.
+
+- Added `ai/services/evaluation.py` with dependency-free temporal IoU, precision@k, recall@k, and per-genre/macro recall metrics plus focused tests. This provides the metric primitives for a future labelled benchmark; there is not yet a curated ground-truth dataset, so it does not establish model quality.
