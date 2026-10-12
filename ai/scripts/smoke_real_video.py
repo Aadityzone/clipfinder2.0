@@ -81,8 +81,9 @@ def run(base_url: str, source_url: str, output_dir: str, secret: str | None) -> 
             end = float(candidate["end"])
         except (KeyError, TypeError, ValueError):
             continue
-        if 0 <= start < end <= duration + 0.05:
-            valid.append((candidate, start, min(end, duration)))
+        clamped_end = min(end, duration)
+        if 0 <= start < clamped_end and end <= duration + 0.05:
+            valid.append((candidate, start, clamped_end))
     if not valid:
         raise RuntimeError("Analysis produced candidates, but none had valid source timestamps")
 
