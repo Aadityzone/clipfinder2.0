@@ -71,3 +71,13 @@ On a legal, accessible test video:
 - Bounded audio probing with FFprobe/FFmpeg timeouts. A failed individual audio sample preserves its timestamp interval but uses null dB values and zero energy rather than fabricated loudness.
 - Added regression tests for missing files, FFmpeg/FFprobe timeouts, probe parsing, partial-stage failure, and correct peak aggregation.
 - CI for this reliability patch is running; no pass is claimed until the latest head completes. Real media performance and deployment behavior remain unverified.
+
+
+## Render and real-video smoke hardening (2026-10-12)
+- Added a 300-second timeout to each FFmpeg render/concat/caption subprocess and to thumbnail generation. Timeout exceptions propagate into the existing job failure/retry path rather than leaving a child process unbounded.
+- Render output validation now requires a non-empty artifact, finite positive duration, finite positive numeric dimensions, and duration within tolerance of the requested edit.
+- Added endpoint tests for invalid source metadata, invalid segments, missing artifacts, malformed output metadata, and FFprobe/FFmpeg timeouts.
+- Added `ai/scripts/smoke_real_video.py`, an opt-in real integration smoke test for authorized media. It calls ingestion → transcription → multimodal analysis → rendering and reports source metadata, transcript/candidate counts, and output size/duration/resolution. It does not mock AI calls when invoked; unit tests mock only the HTTP orchestration.
+- Added tests for the smoke runner's endpoint order and fail-closed behavior when analysis returns no candidates.
+- Latest fully green CI head before the smoke runner was `11da6b4`: Python and web jobs passed. The smoke-runner commits are currently under fresh CI and must be rechecked.
+- Real source download, live model execution, Prisma-backed worker transitions, and authenticated web export remain unverified until the smoke script is run against configured services and a permitted source URL.
