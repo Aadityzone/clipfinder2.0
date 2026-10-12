@@ -130,7 +130,7 @@ def thumbnail(b: ThumbnailRequest, x_ai_secret: str | None = Header(default=None
         os.makedirs(os.path.dirname(b.output_path), exist_ok=True)
         import subprocess
         subprocess.run(["ffmpeg", "-y", "-ss", str(max(0, b.time)), "-i", b.input_path,
-                        "-frames:v", "1", "-q:v", "2", b.output_path], check=True)
+                        "-frames:v", "1", "-q:v", "2", b.output_path], check=True, timeout=300)
         if not os.path.isfile(b.output_path):
             raise RuntimeError("Thumbnail was not created")
         return {"output_path": b.output_path}
