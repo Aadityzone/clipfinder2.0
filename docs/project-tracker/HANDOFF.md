@@ -4,16 +4,15 @@
 `autonomous/engineering-orchestration`, created from `autonomous/product-ui-rebuild`.
 
 ## Current state
-A source-only audit has been recorded in this folder. No code tests, database calls, or media-processing runs have been executed by this audit. Do not describe the pipeline as end-to-end verified.
+The Phase 0 source audit and local CF-001 baseline run are recorded in this folder. The baseline found TypeScript and lint failures; four storage tests and ten focused Python tests passed. Full Python collection and the production build did not pass. No database calls, worker jobs, browser flows, or media-processing runs were executed. Do not describe the pipeline as end-to-end verified.
 
 ## Next steps
-1. Run baseline commands in `TEST_AND_FAILURE_LOG.md` in an available repo runtime.
-2. Verify that `npm --workspace web run worker` is running separately from `npm run dev`.
-3. Check `GET /api/health` and AI `GET /health`; note that the inspected web health route does not verify worker liveness.
-4. Create a small authorized test project and watch its Job rows progress through INGEST, TRANSCRIBE and ANALYZE.
-5. Verify transcript, clips, workspace results, render output and download.
-6. Reproduce historical candidate overlap and LLM scoring tests before making a fix.
-7. Update this tracker with actual evidence and commits.
+1. Fix the existing upload-route TypeScript binding error and four lint errors; rerun typecheck, lint, and build.
+2. Install/enable the `opencv-python-headless` dependency in a controlled Python 3.12 environment and resolve pytest's inaccessible cache directories; rerun the full Python suite.
+3. Agent 2 is implementing CF-005 in `ai/services/llm.py` and `ai/tests/test_pipeline.py`; Agent 5 is reviewing the diff. Preserve the existing analysis response and candidate feature persistence contract.
+4. Clarify a safe worker runtime/deployment context before CF-002; do not target the configured remote Neon database for tests.
+5. Then verify worker job transitions, authorized real media, persisted transcript/candidates, rendering artifact, and downloadable export.
+6. Record actual evidence and commit references here and in `TEST_AND_FAILURE_LOG.md`.
 
 ## Configuration safety
 Do not paste or commit secret values. Only note whether required variables are configured. Never run migrations or tests against production data without explicit environment verification.

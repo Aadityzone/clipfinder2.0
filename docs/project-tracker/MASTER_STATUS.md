@@ -5,6 +5,9 @@ Audit snapshot: branch `autonomous/product-ui-rebuild`; follow-up work branch `a
 ## Overall
 **Product status: PARTIAL.** The repository contains a Next.js app, Prisma/PostgreSQL models, a Python FastAPI media service, and a persistent database-backed worker. End-to-end processing is not yet proven by this audit.
 
+## Local verification (2026-10-12)
+The CF-001 baseline is recorded in `TEST_AND_FAILURE_LOG.md`. Prisma generation/schema validation, storage path tests (4), Python compilation, and focused Python tests passed. Typecheck, lint, and production build currently fail; the full Python test suite cannot collect in this environment. Agent 2's CF-005 change passed its focused tests (8) and contract review, but has no commit. Visible backend, media, route, and UI changes outside Agent 2's ownership remain unclaimed; their tests and migration integration are not attributable. The configured database is remote Neon, so no live database, worker, media, or end-to-end integration test was run.
+
 ## Evidence-based highlights
 | Area | Status | Evidence / gap |
 |---|---|---|
@@ -19,7 +22,7 @@ Audit snapshot: branch `autonomous/product-ui-rebuild`; follow-up work branch `a
 | Rendering | IMPLEMENTED_UNVERIFIED | `ai/services/render.py` uses FFmpeg; worker stores output and marks Render READY after call, but real output validation/end-to-end test not demonstrated here. |
 | Usage limits / billing | PARTIAL | Prisma has Subscription and Usage models and Stripe dependency; enforced plan quotas and billing lifecycle require a separate verified audit. |
 | Storage | IMPLEMENTED_UNVERIFIED | `web/lib/storage.ts` supports local and S3-compatible storage; credentials/bucket/round-trip not tested. |
-| Multi-agent execution | NOT_STARTED | This environment has no confirmed ability to spawn GPT-6 Luna agents. Workstreams are documented, not falsely reported as launched. |
+| Multi-agent execution | PARTIAL | Agent 2's CF-005 implementation was reviewed and focused tests passed. Agents 3 and 4 report audit-only work and no implementation. Several other visible diffs have no confirmed author; see `AGENT_OWNERSHIP.md` and `TEST_AND_FAILURE_LOG.md`. |
 
 ## Priority zero
 1. Verify whether the web worker is actually running wherever the app is deployed; the UI can create durable jobs without a running worker.

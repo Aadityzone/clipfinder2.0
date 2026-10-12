@@ -101,28 +101,39 @@ export async function PUT(
     const first = segments[0];
     const last = segments[segments.length - 1];
 
-    const edit = await db.clipEdit.upsert({
-      where: { clipId: id },
-      create: { clipId: id, aspectRatio, segments },
-      update: { aspectRatio, segments, version: { increment: 1 } },
-    });
+    const edit = await db.$transaction(async (tx) => {
+      const savedEdit = await tx.clipEdit.upsert({
+        where: { clipId: id },
+        create: { clipId: id, aspectRatio, segments },
+        update: { aspectRatio, segments, version: { increment: 1 } },
+      });
 
-    await db.clip.update({
-      where: { id },
-      data: { startS: first.startS, endS: last.endS, status: "EDITING" },
-    });
-    await db.creatorEvent.create({
-      data: {
-        userId: user.id,
-        projectId: clip.projectId,
-        event: "EDIT",
-        metadata: {
-          clipId: id,
-          aspectRatio,
-          segmentCount: segments.length,
-          editVersion: edit.version,
+      await tx.clip.update({
+        where: { id },
+        data: { startS: first.startS, endS: last.endS, status: "EDITING" },
+      });
+      await tx.render.updateMany({
+        where: { clipId: id, status: "READY" },
+        data: { status: "FAILED", error: "Edit changed; render the updated edit before exporting." },
+      });
+      await tx.export.updateMany({
+        where: { clipId: id, status: "READY" },
+        data: { status: "STALE" },
+      });
+      await tx.creatorEvent.create({
+        data: {
+          userId: user.id,
+          projectId: clip.projectId,
+          event: "EDIT",
+          metadata: {
+            clipId: id,
+            aspectRatio,
+            segmentCount: segments.length,
+            editVersion: savedEdit.version,
+          },
         },
-      },
+      });
+      return savedEdit;
     });
 
     return Response.json(edit);

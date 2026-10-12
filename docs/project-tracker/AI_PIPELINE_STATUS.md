@@ -10,12 +10,12 @@ Authorized source URL or uploaded media → media validation/FFprobe → durable
 | Download / ingestion | IMPLEMENTED_UNVERIFIED | `ai/main.py /v1/ingest`, yt-dlp adapter, worker INGEST | Real download not tested; deployment needs yt-dlp, FFmpeg/FFprobe, writable shared working storage. |
 | FFprobe | IMPLEMENTED_UNVERIFIED | `ai/services/media.py`; upload route invokes ffprobe | Corrupt/no-stream media and timeout behavior need tests. |
 | Audio extraction | PARTIAL / VERIFY | Transcription adapter receives media path; no separate extraction call was proven in the inspected adapter | Confirm faster-whisper can process configured media formats efficiently; explicit FFmpeg extraction may be needed. |
-| Transcription | IMPLEMENTED_UNVERIFIED | `ai/transcribe.py` uses faster-whisper, word_timestamps and VAD | Actual model download/runtime and language correctness not tested. |
+| Transcription | IMPLEMENTED_UNVERIFIED | `ai/transcribe.py` lazily loads faster-whisper, uses word_timestamps and VAD, filters malformed timestamps, and bounds word/segment times to the reported or derived duration; focused fake-model tests pass. | Actual model download/runtime, language correctness and persisted word alignment are not tested. |
 | Transcript persistence | IMPLEMENTED_UNVERIFIED | Worker TRANSCRIBE creates Transcript + TranscriptSegment + TranscriptWord | Live database transaction and duplicate/retry behavior not tested. |
-| Candidate generation | PARTIAL | `ai/highlights.py`, `ai/main.py /v1/analyze` | Heuristic keyword/linguistic cues are not proof of reliable semantic highlight quality. |
+| Candidate generation | PARTIAL | `ai/highlights.py` normalizes transcript intervals and caps expanded candidate windows at the last valid transcript boundary; story optimization reuses the same normalizer. Unit tests cover malformed and bounded timestamps. | Heuristic keyword/linguistic cues are not proof of reliable semantic highlight quality; real media duration and candidate quality remain unverified. |
 | Multimodal analysis | PARTIAL | `analyze_media`, semantic/visual/speaker/action modules | Optional dependencies/configuration and per-stage fallback behavior require testing. |
-| LLM scoring | IMPLEMENTED_UNVERIFIED | `ai/services/llm.py`; optional OPENAI_API_KEY | API call is optional; exception handling falls back silently. Need observable signal when rescoring is skipped/failed. |
-| Deduplication | IMPLEMENTED_UNVERIFIED | `ai/services/dedup.py` overlap-IoU filter | Candidate generation regression tests need to be run on current code. |
+| LLM scoring | IMPLEMENTED_UNVERIFIED | `ai/services/llm.py` preserves deterministic scores on fallback and records per-candidate applied/skipped/failed diagnostics in `features.llmScoring`; mocked tests cover missing key, request/malformed response, and invalid model rows. | No live API request was made; provider behavior, timeout characteristics and model ranking quality remain unverified. |
+| Deduplication | IMPLEMENTED_UNVERIFIED | `ai/services/dedup.py` ranks by score, rejects invalid intervals, and suppresses high-IoU or substantially overlapping similar-length windows; focused regression tests pass. | The overlap threshold is heuristic and has not been evaluated against a real transcript corpus. |
 | Result persistence | IMPLEMENTED_UNVERIFIED | Worker ANALYZE writes Analysis, Highlight and Clip in nested Prisma create | No real job demonstrated. |
 | Progress/errors/retry | IMPLEMENTED_UNVERIFIED | Prisma Job plus `web/lib/jobs.ts` and worker | Need verify worker deployment/liveness and UI reflects actual states. |
 | Rendering | IMPLEMENTED_UNVERIFIED | `ai/services/render.py`, worker RENDER | Must validate output exists, is non-empty/playable, and timestamps match before READY. |
@@ -23,6 +23,12 @@ Authorized source URL or uploaded media → media validation/FFprobe → durable
 
 ## Current high-risk integration boundary
 The web worker calls the Python API using `AI_SERVICE_URL` and optional `AI_SERVICE_SECRET`. The worker also requires the same media path to be visible to the AI service or the configured storage adapter to stage media locally. A healthy web app alone does not prove that the worker process is running.
+
+## Local AI reliability verification (2026-10-12)
+- Command: `python -m pytest -q -p no:cacheprovider ai/tests/test_pipeline.py ai/tests/test_advanced_ai.py ai/tests/test_transcription.py ai/tests/test_boundary_optimization.py ai/tests/test_story_intelligence.py ai/tests/test_creator_feedback.py` — exit 0, 24 passed.
+- Command: `python -m py_compile ai/transcribe.py ai/highlights.py ai/services/dedup.py ai/services/story_intelligence.py` — exit 0.
+- `git diff --check` for the AI files changed in this task — exit 0.
+- Tests use fake Whisper/LLM responses and synthetic transcript windows. No Whisper model, external LLM, database, worker, media file, or rendered artifact was exercised. The full AI test suite remains blocked in this Python 3.13 environment because `cv2` is unavailable during collection.
 
 ## Acceptance test
 On a legal, accessible test video:

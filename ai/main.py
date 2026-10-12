@@ -4,7 +4,7 @@ from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe
 from .services.download import download
 from .services.media import ffprobe
-from .services.render import render
+from .services.render import render, validate_render_output, validate_segments
 from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
@@ -202,10 +202,29 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
 def render_route(b: RenderRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
-        render(b.input_path, b.output_path, b.start, b.end, b.aspect, b.segments,
+        source = ffprobe(b.input_path)
+        source_duration = float(source.get("duration") or 0)
+        if source_duration <= 0 or not source.get("width") or not source.get("height"):
+            raise HTTPException(status_code=400, detail="Input media must contain a valid video stream.")
+
+        segments = b.segments if b.segments is not None else [{"start": b.start, "end": b.end}]
+        try:
+            normalized, expected_duration = validate_segments(segments, source_duration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        render(b.input_path, b.output_path, b.start, b.end, b.aspect, normalized,
                b.captions, b.caption_style, b.focus_x)
-        if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 1024:
-            raise RuntimeError("Render output was not created or is invalid")
-        return {"output_path": b.output_path, "size": os.path.getsize(b.output_path)}
+        if not os.path.isfile(b.output_path):
+            raise RuntimeError("Render output was not created")
+        size = os.path.getsize(b.output_path)
+        output = ffprobe(b.output_path)
+        try:
+            validate_render_output(output, size, expected_duration)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return {"output_path": b.output_path, "size": size,
+                "duration": output["duration"], "width": output["width"], "height": output["height"]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

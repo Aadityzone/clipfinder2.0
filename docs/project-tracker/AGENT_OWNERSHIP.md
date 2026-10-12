@@ -1,20 +1,18 @@
 # Agent Ownership and Boundaries
 
-These are proposed workstreams, not a claim that multiple agents were spawned. The current environment's ability to create GPT-6 Luna agents is unconfirmed; work must not be reported as parallel unless it actually happens.
+Ownership map for the five active agents, updated 2026-10-12. The implementation changes are uncommitted in the shared checkout; private or uncommitted work outside that checkout is not visible.
 
-| Workstream | Owned area | Avoid overlap | Outputs |
+| Agent | Assigned task / status | Owned files | Read-only boundaries / dependencies |
 |---|---|---|---|
-| A — Audit / Architecture (lead) | `docs/project-tracker/**`, cross-service contracts | Do not rewrite feature modules without task assignment | Evidence-backed status and interfaces |
-| B — AI Pipeline | `ai/**`, Python tests | Do not modify Prisma schema or web worker without agreed contract | Reliable media → transcript → candidates API |
-| C — Backend / Queue | `web/lib/jobs.ts`, `web/worker.ts`, API routes, Prisma migrations | Do not independently redesign AI response schema | Durable job lifecycle, auth, idempotency |
-| D — Frontend / Workspace | `web/app/**` pages/components | Do not fake job state or mock results in production | UI wired to real persisted results |
-| E — Rendering / Export | `ai/services/render.py`, render worker paths, export APIs | Coordinate Clip/Render contract before schema changes | Validated media outputs |
-| F — QA / Reliability | Tests and CI workflows | Avoid shared production modules except targeted fixes | Reproducible tests and failure log |
-| G — Product readiness | Billing, usage, storage, deployment/observability | Do not change job contracts without lead review | Verified operational/billing boundaries |
+| 1 — Integration & QA lead | CF-001 baseline recorded; cross-service contract review and tracker maintenance | `docs/project-tracker/**` | Application code stays with its assigned owner; do not claim end-to-end verification without a safe database and media runtime. |
+| 2 — AI pipeline | CF-005 implementation complete at focused-test level; no commit | `ai/services/llm.py`, `ai/tests/test_pipeline.py` | Agent 2 confirms it did not author `ai/highlights.py`, `ai/transcribe.py`, `ai/main.py`, `ai/services/dedup.py`, or `ai/services/render.py`; ownership of these visible diffs is unresolved. |
+| 3 — Backend / queue | Audit and proposal only; no implementation | None. Proposed CF-007 files: `web/worker.ts`, `web/app/api/health/route.ts` | Agent 3 confirms it authored none of the visible backend changes. `prisma/schema.prisma`, `web/lib/jobs.ts`, worker/health and added helpers/tests remain unclaimed. No migrations directory exists. |
+| 4 — Frontend / workspace | Audit and proposal only; no implementation | None. Proposed UI: `web/app/project/[id]/page.tsx` and optional client component | Agent 4 confirms it authored none of the visible UI or clip API changes. Ownership of `Editor.tsx`, account action components, and caption/edit/export routes is unresolved. |
+| 5 — Independent reviewer | Review-only; reviewed CF-005 diff, no blocking contract defect found | No write ownership | Review visible plans/diffs/tests only; private workspaces and unavailable PR tooling remain outside scope. |
 
 ## Integration rules
-- One accountable owner per task; use separate branches/worktrees when supported.
+- One accountable owner per task; the current agents share this checkout, so the visible uncommitted diff is the integration surface.
 - Define request/response types and state transitions before cross-service changes.
 - Do not commit secrets or read production secret values unnecessarily.
 - Record exact commands, test results, and commit SHAs.
-- If agent spawning is unavailable, execute dependency-ready tasks sequentially and clearly label them single-agent.
+- Record a proposed task as active only after its owner starts it.
