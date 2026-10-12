@@ -17,6 +17,7 @@ from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
+from .services.event_candidates import generate_event_candidates
 import hmac
 import os
 import uuid
@@ -158,8 +159,23 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
-    result = optimize_candidates(b.segments, result)
-    diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
+    if b.segments:
+        result = optimize_candidates(b.segments, result)
+
+    # Transcript-first candidates can miss gameplay, visual events, or loud
+    # reactions when speech is sparse. Add independent event candidates without
+    # fabricating semantic labels; deduplication below collapses overlapping windows.
+    event_result = generate_event_candidates(media, b.instruction, b.categories)
+    for event in event_result:
+        event["text"] = " ".join(
+            str(segment.get("text", "")).strip()
+            for segment in b.segments
+            if float(segment.get("end", 0)) > event["start"]
+            and float(segment.get("start", 0)) < event["end"]
+        ).strip()
+    result.extend(event_result)
+
+    diarized = diarize(b.media_path, b.segments) if b.media_path and b.segments else {"available": False, "segments": []}
     analysis_segments = diarized.get("segments") or b.segments
     speaker = speaker_signals(analysis_segments)
     for candidate in result:
