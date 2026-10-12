@@ -6,6 +6,9 @@ import math
 from .captions import write_ass
 
 
+FFMPEG_TIMEOUT_SECONDS = 300
+
+
 def validate_segments(segments: list[dict], source_duration: float) -> tuple[list[dict], float]:
     if not segments or len(segments) > 100:
         raise ValueError("Provide between 1 and 100 render segments.")
@@ -88,6 +91,8 @@ def render(
                     "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
             )
             return
 
@@ -104,6 +109,7 @@ def render(
                         "-movflags", "+faststart", part_path,
                     ],
                     check=True,
+                    timeout=FFMPEG_TIMEOUT_SECONDS,
                 )
                 parts.append(part_path)
 
