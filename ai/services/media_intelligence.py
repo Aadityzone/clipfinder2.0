@@ -31,7 +31,7 @@ def audio_features(path: str) -> tuple[dict[str, Any], list[dict]]:
 
     mean = re.search(r"mean_volume:\s*(-?[0-9.]+) dB", text)
     peak = re.search(r"max_volume:\s*(-?[0-9.]+) dB", text)
-    duration = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\\.\d+)?)", text)
+    duration = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", text)
 
     try:
         windows = loudness_windows(path)
