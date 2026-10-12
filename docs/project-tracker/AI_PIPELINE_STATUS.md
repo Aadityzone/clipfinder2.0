@@ -40,3 +40,13 @@ On a legal, accessible test video:
 6. Confirm clips/highlights persist and appear in the authenticated workspace.
 7. Render at least one clip; verify actual output file exists and can be decoded/played.
 8. Confirm job terminal state, error semantics, usage increment and downloadable export.
+
+
+## Multimodal event candidate work (2026-10-12)
+
+- Added `ai/services/event_candidates.py`: proposes timestamp-bounded candidates from audio-energy windows, sampled visual change/motion, scene changes, on-screen action/OCR cues, and optional semantic frame scores. It can propose candidates when transcript segments are empty or sparse.
+- Integrated event candidates into `POST /v1/analyze` after transcript story optimization so event windows keep their own timestamps. Existing deduplication remains the overlap gate.
+- Exposes candidate provenance through `features.candidateSource=media_events`, `eventTypes`, and `eventEvidenceScore`. The LLM compact payload now receives these features and has explicit instructions not to treat loudness/motion alone as proof of clip quality.
+- Added focused tests in `ai/tests/test_event_candidates.py` for audio-only and visual/on-screen signals, short media bounds, absent data, and semantic-category non-fabrication.
+- Change under review: [PR #18](https://github.com/Aadityzone/clipfinder2.0/pull/18). The latest GitHub Actions run is pending; no pass is claimed.
+- Limits: event signals are candidate proposals, not semantic understanding. Current audio-energy, motion, scene and OCR heuristics need validation against labelled cross-genre videos. No live video or end-to-end persisted/exported clip has been tested by this patch.
