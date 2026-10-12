@@ -157,7 +157,17 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     media = analyze_media(b.media_path) if b.media_path else {}
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
-        media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
+        try:
+            media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
+            media["visualSemanticStatus"] = {"available": True}
+        except Exception as exc:
+            # Semantic frame scoring is optional; its failure must not discard
+            # transcript candidates or other media evidence.
+            media["visualSemantic"] = []
+            media["visualSemanticStatus"] = {
+                "available": False,
+                "reason": type(exc).__name__,
+            }
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
     if b.segments:
