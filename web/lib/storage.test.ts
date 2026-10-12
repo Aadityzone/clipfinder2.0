@@ -77,3 +77,36 @@ test("local storage reports missing objects instead of pretending they exist", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("failed stream uploads never publish partial files or leave temporary artifacts", async () => {
+  const { mkdtemp, readdir, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { Readable } = await import("node:stream");
+  const { saveStream } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-partial-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "local";
+
+  try {
+    async function* brokenUpload() {
+      yield Buffer.from("partial-data");
+      throw new Error("simulated interrupted upload");
+    }
+
+    await assert.rejects(
+      saveStream("projects/project-1/interrupted.mp4", Readable.from(brokenUpload())),
+      /simulated interrupted upload/,
+    );
+    await assert.rejects(stat(path.join(root, "projects/project-1/interrupted.mp4")));
+    assert.deepEqual(await readdir(path.join(root, "projects/project-1")), []);
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    await rm(root, { recursive: true, force: true });
+  }
+});
