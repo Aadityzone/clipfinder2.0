@@ -37,8 +37,13 @@ def test_generates_visual_and_on_screen_candidates_for_low_speech_gameplay():
     result = generate_event_candidates(media)
 
     assert result
-    assert any("visual_change" in item["features"]["eventTypes"] for item in result)
-    assert any("on_screen_event" in item["features"]["eventTypes"] for item in result)
+    candidate = next(item for item in result if "on_screen_event" in item["features"]["eventTypes"])
+    assert "visual_change" in candidate["features"]["eventTypes"]
+    assert candidate["features"]["visualChange"] == 0.9
+    assert candidate["features"]["motion"] == 0.8
+    assert candidate["features"]["gameplayLikeRatio"] == 1.0
+    assert candidate["features"]["onScreenActionLabels"] == ["combat"]
+    assert candidate["features"]["onScreenText"] == "VICTORY"
     assert all(item["text"] == "" for item in result)
 
 
@@ -68,7 +73,6 @@ def test_event_windows_are_bounded_for_short_media():
     assert result
     assert result[0]["start"] == 0
     assert result[0]["end"] == 4
-
 
 
 def test_analyze_route_returns_event_candidates_without_transcript(monkeypatch):
