@@ -26,3 +26,54 @@ test("storagePath rejects empty and null-byte keys", () => {
   assert.throws(() => storagePath(""), /non-empty relative path/);
   assert.throws(() => storagePath("clips/\0outside.mp4"), /non-empty relative path/);
 });
+
+
+test("local storage writes a stream and resolves the persisted object", async () => {
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { Readable } = await import("node:stream");
+  const { ensureLocalStorage, headStorage, saveStream } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-test-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "local";
+
+  try {
+    const key = "projects/project-1/source.bin";
+    const expected = Buffer.from("clipfinder-local-storage-roundtrip");
+    const savedPath = await saveStream(key, Readable.from([expected]));
+
+    assert.equal(savedPath, path.resolve(root, key));
+    assert.deepEqual(await readFile(savedPath), expected);
+    assert.equal(await ensureLocalStorage(key), savedPath);
+    assert.deepEqual(await headStorage(key), { size: expected.length, contentType: undefined });
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local storage reports missing objects instead of pretending they exist", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { ensureLocalStorage } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-missing-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "local";
+
+  try {
+    await assert.rejects(ensureLocalStorage("projects/missing/source.mp4"), /Storage file not found/);
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    await rm(root, { recursive: true, force: true });
+  }
+});
