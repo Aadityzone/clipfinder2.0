@@ -63,3 +63,11 @@ On a legal, accessible test video:
 - Added `docs/project-tracker/AI_BENCHMARKING.md` with the schema, command, and methodology.
 - Latest GitHub Actions run for PR #18 head `d5f9ec6` completed successfully: Python and web jobs both succeeded. This is CI evidence only; it is not a real-video end-to-end result.
 - Still no curated label dataset checked into the repository. Benchmark runner correctness is testable, but ranking quality is not established until real labelled videos are supplied.
+
+
+## Media-analysis reliability hardening (2026-10-12)
+- Fixed `audio_features()` to always return the same `(summary, windows)` tuple contract, including missing files. Previously the missing-file branch returned a dict and could break unpacking in `analyze_media()`.
+- Added subprocess timeouts and independent fallbacks for FFmpeg audio summary, scene-change analysis, and auxiliary visual/on-screen/face stages. A failed optional media stage now returns explicit unavailable metadata and should not discard other available signals.
+- Bounded audio probing with FFprobe/FFmpeg timeouts. A failed individual audio sample preserves its timestamp interval but uses null dB values and zero energy rather than fabricated loudness.
+- Added regression tests for missing files, FFmpeg/FFprobe timeouts, probe parsing, partial-stage failure, and correct peak aggregation.
+- CI for this reliability patch is running; no pass is claimed until the latest head completes. Real media performance and deployment behavior remain unverified.
