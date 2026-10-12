@@ -53,3 +53,25 @@ def test_genre_report_exposes_macro_recall_for_cross_genre_benchmarks():
     assert result["perGenreRecallAtK"]["gaming"] == 1.0
     assert result["perGenreRecallAtK"]["podcast"] == 0.0
     assert result["macroRecallAtK"] == 0.5
+
+
+def test_genre_report_does_not_let_one_genres_predictions_claim_another_genres_truth():
+    truth = [
+        {"start": 10, "end": 20, "genre": "gaming"},
+        {"start": 10, "end": 20, "genre": "podcast"},
+    ]
+    predictions = [{"start": 10, "end": 20, "score": 99, "genre": "gaming"}]
+
+    result = evaluate_by_genre(predictions, truth, top_k=1)
+
+    assert result["perGenreRecallAtK"]["gaming"] == 1.0
+    assert result["perGenreRecallAtK"]["podcast"] == 0.0
+
+
+def test_evaluation_rejects_invalid_k_and_threshold():
+    import pytest
+
+    with pytest.raises(ValueError):
+        evaluate_candidates([], [], top_k=0)
+    with pytest.raises(ValueError):
+        evaluate_candidates([], [], iou_threshold=float("nan"))
