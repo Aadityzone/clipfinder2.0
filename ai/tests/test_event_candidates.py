@@ -99,3 +99,21 @@ def test_analyze_route_returns_event_candidates_without_transcript(monkeypatch):
         for item in response["candidates"]
     )
     assert all(0 <= item["start"] < item["end"] <= 60 for item in response["candidates"])
+
+
+
+def test_audio_event_window_is_centered_on_energy_window_midpoint():
+    media = {
+        "durationS": 120,
+        "audioWindows": [
+            {"start": 40, "end": 50, "energy": 0.95, "peakDb": -4.0},
+        ],
+    }
+
+    result = generate_event_candidates(media)
+
+    assert len(result) == 1
+    candidate = result[0]
+    midpoint = (candidate["start"] + candidate["end"]) / 2
+    assert abs(midpoint - 45) < 0.01
+    assert candidate["features"]["audioPeakDb"] == -4.0
