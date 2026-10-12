@@ -94,3 +94,44 @@ def test_analyze_supports_event_only_candidates_without_transcript(monkeypatch):
             "text": "",
         }
     ]
+
+
+def test_optional_semantic_frame_failure_keeps_analysis_available(monkeypatch):
+    observed_media = {}
+
+    monkeypatch.setenv("VISUAL_SEMANTIC_BACKEND", "clip")
+    monkeypatch.setattr(main, "analyze_media", lambda _path: {"durationS": 12})
+
+    def fail_semantic(_path, _instruction):
+        raise RuntimeError("model unavailable")
+
+    def transcript_candidates(_segments, _instruction, _categories, media):
+        observed_media.update(media)
+        return []
+
+    monkeypatch.setattr(main, "semantic_frame_scores", fail_semantic)
+    monkeypatch.setattr(main, "candidates", transcript_candidates)
+    monkeypatch.setattr(main, "enrich_semantics", lambda items, *_args: items)
+    monkeypatch.setattr(main, "generate_event_candidates", lambda *_args: [])
+    monkeypatch.setattr(main, "speaker_signals", lambda _segments: {"segments": []})
+    monkeypatch.setattr(main, "deduplicate", lambda items: items)
+    monkeypatch.setattr(main, "score_candidates", lambda items, *_args: items)
+    monkeypatch.setattr(main, "rank_candidates", lambda items: items)
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda items, *_args: items)
+
+    response = client.post(
+        "/v1/analyze",
+        json={
+            "segments": [],
+            "media_path": "/fixture/video.mp4",
+            "instruction": "Find moments with a dramatic visual reveal",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["candidates"] == []
+    assert observed_media["visualSemantic"] == []
+    assert observed_media["visualSemanticStatus"] == {
+        "available": False,
+        "reason": "RuntimeError",
+    }
