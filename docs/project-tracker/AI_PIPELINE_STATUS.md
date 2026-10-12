@@ -88,3 +88,5 @@ On a legal, accessible test video:
 - When S3/object storage is configured, the completed temporary file is uploaded to the durable object key before the local cache is replaced. A failed stream or S3 write must not expose a partial new file as the final local object.
 - Added a regression test that interrupts a stream and checks that neither the final path nor a temporary artifact remains.
 - CI for this storage hardening is pending on the current branch head; the latest commit must pass web typecheck, storage tests, lint and build before this is considered verified.
+
+- Verification update: commit `30f8050` completed CI successfully: Python suite **123 passed**; web Prisma generation/validation, typecheck, storage tests (including interrupted-upload cleanup), lint, and production build all passed. Later smoke-boundary/render-timeout test refinements and CI concurrency config are still pending on the newest head.
