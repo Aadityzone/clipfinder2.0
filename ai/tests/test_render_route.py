@@ -93,15 +93,15 @@ def test_thumbnail_route_bounds_ffmpeg_execution(monkeypatch, tmp_path):
         assert kwargs["timeout"] == 300
         raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=300)
 
-    monkeypatch.setattr(main.subprocess, "run", timeout, raising=False)
-    response = client.post(
-        "/v1/thumbnail",
-        json={
-            "input_path": str(tmp_path / "source.mp4"),
-            "output_path": str(tmp_path / "thumbnail.jpg"),
-            "time": 1.5,
-        },
-    )
+    with patch("subprocess.run", side_effect=timeout):
+        response = client.post(
+            "/v1/thumbnail",
+            json={
+                "input_path": str(tmp_path / "source.mp4"),
+                "output_path": str(tmp_path / "thumbnail.jpg"),
+                "time": 1.5,
+            },
+        )
 
     assert response.status_code == 500
     assert "timed out" in response.json()["detail"].lower()
