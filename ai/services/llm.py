@@ -83,7 +83,11 @@ def score_candidates(candidates: list[dict], transcript: str, instruction: str |
             "input": [
                 {"role": "system", "content":
                  "Return JSON only: an array of objects with i, score (0-100), rationale. "
-                 "Judge the supplied text and context. Do not invent candidates."},
+                 "Judge the supplied text, time range, transcript context, and modality features. " 
+                 "For media_events candidates, consider eventTypes, on-screen action/text, motion, " 
+                 "visual change and audio evidence together; loudness or motion alone is not proof " 
+                 "of a worthwhile clip. Reward meaningful, self-contained moments across genres. " 
+                 "Do not invent events or candidates; when evidence is weak, score conservatively."},
                 {"role": "user", "content": json.dumps(prompt)},
             ],
         }).encode()
