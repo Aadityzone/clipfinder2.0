@@ -1,7 +1,8 @@
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, stat, writeFile, unlink } from "node:fs/promises";
+import { mkdir, stat, writeFile, unlink, rename } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { pipeline } from "node:stream/promises";
 import { S3Client, GetObjectCommand, HeadObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
@@ -46,10 +47,29 @@ export async function checkStorageHealth():Promise<void>{
 }
 export async function ensureStorage(){await mkdir(storageRoot(),{recursive:true})}
 export async function saveStream(key:string,stream:NodeJS.ReadableStream){
-  await ensureStorage();const target=storagePath(key);await mkdir(path.dirname(target),{recursive:true});
-  await new Promise<void>((resolve,reject)=>{const out=createWriteStream(target);stream.pipe(out);out.on("finish",resolve);out.on("error",reject);stream.on("error",reject)});
-  if(isObjectStorage())await putFile(key,target);
-  return target;
+  await ensureStorage();
+  const target=storagePath(key);
+  await mkdir(path.dirname(target),{recursive:true});
+  // Never expose a partially-written upload at its final key. Readers can see
+  // either the previous complete file or the new complete file after rename.
+  const temporary=target+".upload-"+randomUUID()+".tmp";
+  try{
+    await pipeline(stream as any,createWriteStream(temporary,{flags:"wx"}));
+    await rename(temporary,target);
+    if(isObjectStorage()){
+      try{
+        await putFile(key,target);
+      }catch(error){
+        // A local cache file is not evidence that the durable S3 write worked.
+        await unlink(target).catch(()=>{});
+        throw error;
+      }
+    }
+    return target;
+  }catch(error){
+    await unlink(temporary).catch(()=>{});
+    throw error;
+  }
 }
 export async function putFile(key:string,filePath:string,mimeType?:string){
   if(!isObjectStorage())return;
