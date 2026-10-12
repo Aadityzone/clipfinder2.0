@@ -1,6 +1,11 @@
 name: CI
 on: [push, pull_request]
 
+# Avoid spending runner time testing every superseded commit on a fast-moving branch.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     env:
