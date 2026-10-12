@@ -89,3 +89,5 @@ For each run, record:
   python -m ai.scripts.smoke_real_video --url "AUTHORIZED_VIDEO_URL" --output-dir "/shared/media/clipfinder-e2e"
   ```
   The output directory must be writable on the AI service host/container. Set `AI_SERVICE_URL` and optionally `AI_SERVICE_SECRET` in the environment; do not commit secrets. Use only media you have permission to process.
+
+- CI update for commit `30f8050ad7e1f4d05a5b5371553f100f908c7dd2`: Python suite **123 passed**; web Prisma generation, schema validation, typecheck, storage tests, lint, and build all passed. This includes the real-video smoke harness unit tests and atomic upload cleanup test. Newer follow-up tests for zero-duration candidate clamping and timeout coverage across every FFmpeg render stage, plus the CI concurrency update, remain unverified until latest-head Actions complete.
