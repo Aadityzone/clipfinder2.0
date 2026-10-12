@@ -48,7 +48,7 @@ def _duration(media: dict) -> float:
 def _window(center: float, duration: float) -> tuple[float, float]:
     length = min(MAX_CLIP_SECONDS, duration)
     length = min(duration, max(min(MIN_CLIP_SECONDS, duration), length))
-    start = max(0.0, min(center - length * 0.38, duration - length))
+    start = max(0.0, min(center - length * 0.5, duration - length))
     return round(start, 3), round(start + length, 3)
 
 
