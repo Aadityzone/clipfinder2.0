@@ -33,7 +33,7 @@ def test_failed_audio_sample_keeps_bounded_timeline_without_fake_energy(monkeypa
         assert "timeout" in kwargs
         if args[0] == "ffprobe":
             return Probe()
-        if calls["count"] == 2:
+        if calls["count"] == 3:
             raise TimeoutExpired("ffmpeg", 30)
 
         class Sample:
