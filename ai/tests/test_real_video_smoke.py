@@ -76,3 +76,25 @@ def test_smoke_pipeline_fails_when_analysis_has_no_candidates(monkeypatch, tmp_p
         assert "no candidates" in str(exc)
     else:
         raise AssertionError("Expected empty candidate analysis to fail the smoke test")
+
+
+def test_smoke_pipeline_rejects_candidate_clamped_to_zero_duration(monkeypatch, tmp_path):
+    def fake_post(_base_url, path, _payload, _secret):
+        if path == "/v1/ingest":
+            return {"media_path": "/shared/source.mp4", "metadata": {"duration": 30, "width": 1280, "height": 720}}
+        if path == "/v1/transcribe":
+            return {"language": "en", "text": "", "segments": []}
+        if path == "/v1/analyze":
+            return {"candidates": [
+                {"start": 30, "end": 30.02, "score": 100, "category": "AI Detect"},
+            ]}
+        raise AssertionError(f"Render must not run for a zero-duration segment: {path}")
+
+    monkeypatch.setattr(smoke_real_video, "post_json", fake_post)
+
+    try:
+        smoke_real_video.run("http://ai.test", "https://youtu.be/fixture", str(tmp_path), None)
+    except RuntimeError as exc:
+        assert "valid source timestamps" in str(exc)
+    else:
+        raise AssertionError("Expected the invalid candidate to be rejected")
