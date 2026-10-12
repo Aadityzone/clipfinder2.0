@@ -61,6 +61,16 @@ def score_candidates(candidates: list[dict], transcript: str, instruction: str |
                 "audioEnergy": _features(c).get("audioEnergy", 0),
                 "sceneHits": _features(c).get("sceneHits", 0),
                 "faceHits": _features(c).get("faceHits", 0),
+                # Keep event provenance visible to the model; empty transcript text
+                # must not make a visual/audio candidate look like an ordinary quote.
+                "candidateSource": _features(c).get("candidateSource", "transcript"),
+                "eventTypes": _features(c).get("eventTypes", []),
+                "eventEvidenceScore": _features(c).get("eventEvidenceScore"),
+                "visualChange": _features(c).get("visualChange", 0),
+                "motion": _features(c).get("motion", 0),
+                "gameplayLike": _features(c).get("gameplayLike", False),
+                "onScreenActionLabels": _features(c).get("onScreenActionLabels", []),
+                "onScreenText": _features(c).get("onScreenText", "")[:300],
             },
         } for i, c in enumerate(submitted)]
         prompt = {
