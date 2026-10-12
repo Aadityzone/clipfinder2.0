@@ -75,3 +75,17 @@ For each run, record:
 - Synthetic FFmpeg artifact check: generated a 4-second `testsrc` + sine MP4 with FFmpeg 9.0.1; invoked `render(source, output, aspect='16:9', segments=[{'start':0.5,'end':3.5}])`; `ffprobe(output)` and `validate_render_output` passed. Observed duration 3.0 s, dimensions 1920x1080, size 91,033 bytes. The temporary fixture directory was removed afterward.
 - A separate two-segment render with captions reached `TemporaryDirectory` cleanup but exited with `PermissionError: [WinError 5] Access is denied` for the generated `%TEMP%\clipfinder-caption-*` path; the output was not treated as verified. No output from that attempt was retained in the workspace.
 - No database transaction, worker state transition, storage round-trip, browser export, or ranged download was executed. Those integration behaviors remain unverified.
+
+
+## Render timeout and real-video smoke harness (2026-10-12)
+- Earlier CI head `11da6b41704682e85801dec6dd75dd3588b04d52`: both Python and web jobs completed successfully. Python suite reported 118 passed; web Prisma generation/validation, typecheck, storage tests, lint and build all passed.
+- Added bounded FFmpeg render and thumbnail calls (300-second subprocess timeout), defensive finite-positive render dimension validation, and endpoint regression tests.
+- Added `ai/scripts/smoke_real_video.py` for a real authorized URL through `/v1/ingest`, `/v1/transcribe`, `/v1/analyze`, and `/v1/render`. It reports the output artifact metadata from the AI service; it explicitly does not claim Prisma worker or browser export coverage.
+- Added orchestration tests for the smoke harness. CI for the newest commits is queued/in progress at the time of this entry; no passing result is claimed for the newest head.
+- To run against a configured AI service (not production unless deliberately configured), from repository root:
+  ```bash
+  python -m py_compile ai/scripts/smoke_real_video.py
+  PYTHONPATH=. python -m pytest -q ai/tests/test_real_video_smoke.py
+  python -m ai.scripts.smoke_real_video --url "AUTHORIZED_VIDEO_URL" --output-dir "/shared/media/clipfinder-e2e"
+  ```
+  The output directory must be writable on the AI service host/container. Set `AI_SERVICE_URL` and optionally `AI_SERVICE_SECRET` in the environment; do not commit secrets. Use only media you have permission to process.
