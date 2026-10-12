@@ -1,13 +1,12 @@
 """Small, dependency-free evaluation metrics for highlight candidate quality.
 
 Ground-truth moments use {"start": float, "end": float, optional "genre": str}.
-Predictions use the same interval fields and may include a score. These metrics
-are intended for offline labelled fixtures, not as a claim that any model is good.
+Predictions use the same interval fields and may include a score and genre. Metrics
+are for labelled offline fixtures, not a claim that any model is good.
 """
 from __future__ import annotations
 
 import math
-from collections import defaultdict
 
 
 def _interval(item: dict) -> tuple[float, float] | None:
@@ -24,6 +23,18 @@ def _interval(item: dict) -> tuple[float, float] | None:
     return start, end
 
 
+def _genre(item: dict) -> str:
+    return str(item.get("genre", "unknown")).strip().lower() or "unknown"
+
+
+def _score(item: dict) -> float:
+    value = item.get("score", 0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) else 0.0
+
+
 def temporal_iou(left: dict, right: dict) -> float:
     """Intersection-over-union for two valid temporal intervals; invalid is zero."""
     a, b = _interval(left), _interval(right)
@@ -37,22 +48,14 @@ def temporal_iou(left: dict, right: dict) -> float:
 def evaluate_candidates(predictions: list[dict], ground_truth: list[dict],
                         top_k: int = 10, iou_threshold: float = 0.5) -> dict:
     """Return precision@k, recall@k, and mean best-IoU using one-to-one matching."""
-    if top_k < 1:
-        raise ValueError("top_k must be at least 1")
-    if not math.isfinite(float(iou_threshold)) or not 0 <= iou_threshold <= 1:
+    if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 1:
+        raise ValueError("top_k must be an integer of at least 1")
+    if isinstance(iou_threshold, bool) or not math.isfinite(float(iou_threshold)) or not 0 <= iou_threshold <= 1:
         raise ValueError("iou_threshold must be between 0 and 1")
 
     valid_truth = [item for item in ground_truth if _interval(item) is not None]
     valid_predictions = [item for item in predictions if _interval(item) is not None]
-    valid_predictions.sort(
-        key=lambda item: (
-            -float(item.get("score", 0))
-            if isinstance(item.get("score", 0), (int, float))
-            and not isinstance(item.get("score", 0), bool)
-            and math.isfinite(float(item.get("score", 0)))
-            else 0.0
-        )
-    )
+    valid_predictions.sort(key=_score, reverse=True)
     selected = valid_predictions[:top_k]
     unmatched_truth = set(range(len(valid_truth)))
     matches = []
@@ -85,20 +88,23 @@ def evaluate_candidates(predictions: list[dict], ground_truth: list[dict],
 
 def evaluate_by_genre(predictions: list[dict], ground_truth: list[dict],
                       top_k: int = 10, iou_threshold: float = 0.5) -> dict:
-    """Compute per-genre recall and macro recall for a labelled cross-genre set."""
-    genres = sorted({
-        str(item.get("genre", "unknown")).strip().lower() or "unknown"
-        for item in ground_truth
-        if _interval(item) is not None
-    })
+    """Compute per-genre recall and macro recall without cross-genre leakage.
+
+    When a prediction has a genre label, it is evaluated only against that genre.
+    Unlabelled predictions are retained as genre-agnostic proposals.
+    """
+    valid_truth = [item for item in ground_truth if _interval(item) is not None]
+    genres = sorted({_genre(item) for item in valid_truth})
     per_genre = {}
     for genre in genres:
-        truth = [item for item in ground_truth
-                 if _interval(item) is not None
-                 and (str(item.get("genre", "unknown")).strip().lower() or "unknown") == genre]
-        # Each source's prediction list should already be evaluated separately; this
-        # helper measures recall for each genre's labelled moments against all proposals.
-        metrics = evaluate_candidates(predictions, truth, top_k, iou_threshold)
+        truth = [item for item in valid_truth if _genre(item) == genre]
+        relevant_predictions = [
+            item for item in predictions
+            if not isinstance(item, dict)
+            or not item.get("genre")
+            or _genre(item) == genre
+        ]
+        metrics = evaluate_candidates(relevant_predictions, truth, top_k, iou_threshold)
         per_genre[genre] = metrics["recallAtK"]
     macro = sum(per_genre.values()) / len(per_genre) if per_genre else 0.0
     return {"perGenreRecallAtK": per_genre, "macroRecallAtK": round(macro, 4)}
