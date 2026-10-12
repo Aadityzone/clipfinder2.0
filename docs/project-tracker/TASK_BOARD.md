@@ -25,3 +25,6 @@ CF-001 baseline is recorded; see `TEST_AND_FAILURE_LOG.md` for failures that kee
 
 
 | CF-014 | P1 | AI/QA | Add reproducible labelled cross-genre ranking benchmark | CF-012, CF-013 | Validated manifest, per-video metrics, genre means, and test coverage; no synthetic labels treated as evidence | IMPLEMENTED IN PR #18; CI passed on head d5f9ec6; real labelled dataset still missing |
+
+
+| CF-015 | P0 | AI | Make optional media-analysis stages bounded and fault-isolated | CF-012 | Missing files and FFmpeg timeouts degrade gracefully; failed windows never invent energy; scene evidence reaches reranker | IMPLEMENTED IN PR #18; latest CI pending |
