@@ -55,16 +55,11 @@ export async function saveStream(key:string,stream:NodeJS.ReadableStream){
   const temporary=target+".upload-"+randomUUID()+".tmp";
   try{
     await pipeline(stream as any,createWriteStream(temporary,{flags:"wx"}));
+    // In S3 mode, publish the durable object from the completed temporary file
+    // before replacing the local cache. A failed S3 write leaves the old cache
+    // untouched and never exposes a partial upload at the final key.
+    if(isObjectStorage())await putFile(key,temporary);
     await rename(temporary,target);
-    if(isObjectStorage()){
-      try{
-        await putFile(key,target);
-      }catch(error){
-        // A local cache file is not evidence that the durable S3 write worked.
-        await unlink(target).catch(()=>{});
-        throw error;
-      }
-    }
     return target;
   }catch(error){
     await unlink(temporary).catch(()=>{});
