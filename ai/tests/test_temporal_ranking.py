@@ -73,3 +73,15 @@ def test_ranking_is_deterministic_for_equal_scores():
     ranked = rank_candidates(candidates)
 
     assert [item["start"] for item in ranked] == [0, 20]
+
+
+def test_scene_transition_signal_is_visible_in_ranking_diagnostics():
+    ranked = rank_candidates([{
+        "start": 5, "end": 20, "score": 65, "text": "",
+        "features": {"sceneChangeCount": 4},
+    }])
+
+    diagnostics = ranked[0]["features"]["temporalRanking"]
+    assert diagnostics["signals"]["multimodal"] == 0.8
+    assert "scene" in diagnostics["modalities"]
+    assert diagnostics["modalityCount"] == 1
