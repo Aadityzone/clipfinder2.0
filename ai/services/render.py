@@ -92,7 +92,6 @@ def render(
                 ],
                 check=True,
                 timeout=FFMPEG_TIMEOUT_SECONDS,
-                timeout=FFMPEG_TIMEOUT_SECONDS,
             )
             return
 
@@ -124,6 +123,7 @@ def render(
                     "-c", "copy", "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
             )
 
     if not captions:
@@ -145,4 +145,5 @@ def render(
                 "-c:a", "copy", "-movflags", "+faststart", output_path,
             ],
             check=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
         )
