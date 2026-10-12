@@ -68,3 +68,30 @@ def test_event_windows_are_bounded_for_short_media():
     assert result
     assert result[0]["start"] == 0
     assert result[0]["end"] == 4
+
+
+
+def test_analyze_route_returns_event_candidates_without_transcript(monkeypatch):
+    from ai import main
+
+    media = {
+        "audio": {"durationS": 60},
+        "audioWindows": [
+            {"start": 20, "end": 25, "energy": 0.95, "peakDb": -1.5},
+        ],
+    }
+    monkeypatch.setattr(main, "analyze_media", lambda _path: media)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    response = main.analyze(main.AnalyzeRequest(
+        segments=[],
+        media_path="/synthetic/fixture.mp4",
+        categories=["ai_detect"],
+    ))
+
+    assert response["candidates"]
+    assert any(
+        item.get("features", {}).get("candidateSource") == "media_events"
+        for item in response["candidates"]
+    )
+    assert all(0 <= item["start"] < item["end"] <= 60 for item in response["candidates"])
