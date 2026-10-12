@@ -18,6 +18,7 @@ from .services.visual_intelligence import semantic_frame_scores, visual_capabili
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
 from .services.event_candidates import generate_event_candidates
+from .services.temporal_ranking import rank_candidates
 import hmac
 import os
 import uuid
@@ -203,6 +204,11 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             }
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
+    # Deterministic multimodal ranking keeps upstream/LLM scores dominant while
+    # using available story, transcript, and media evidence as a bounded signal.
+    result = rank_candidates(result)
+    # Creator preferences are applied after the general ranker so personal taste
+    # can adjust ordering without rewriting the general-purpose evidence record.
     result = apply_creator_preferences(result, b.creator_preferences)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
