@@ -1,20 +1,11 @@
 """CLI to evaluate saved Clip Finder candidates against curated temporal labels.
 
-Manifest format:
-{
-  "version": 1,
-  "cases": [
-    {
-      "id": "gaming-session-01",
-      "genre": "gaming",
-      "predictions": [{"start": 12.0, "end": 35.0, "score": 84.0}],
-      "groundTruth": [{"start": 16.0, "end": 31.0}]
-    }
-  ]
-}
+Manifest: {"version": 1, "cases": [{"id": "...", "genre": "...",
+"predictions": [{"start": 12, "end": 35, "score": 84}],
+"groundTruth": [{"start": 16, "end": 31}]}]}
 
-The runner reports the provided scores and scores after the deterministic ranker.
-It never invents labels or treats sample data as evidence of model quality.
+Each case is a separate source video. Metrics are computed per video first, then
+averaged by genre; timestamps from different videos are never matched together.
 """
 from __future__ import annotations
 
@@ -27,10 +18,10 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from ai.services.evaluation import evaluate_by_genre, evaluate_candidates
+    from ai.services.evaluation import evaluate_candidates
     from ai.services.temporal_ranking import rank_candidates
 except ImportError:  # Support running from ai/ as the working directory.
-    from services.evaluation import evaluate_by_genre, evaluate_candidates
+    from services.evaluation import evaluate_candidates
     from services.temporal_ranking import rank_candidates
 
 
@@ -82,51 +73,52 @@ def load_manifest(path: str | Path) -> dict:
     return data
 
 
+def _mean(values: list[float]) -> float:
+    return round(sum(values) / len(values), 4) if values else 0.0
+
+
 def run_benchmark(manifest: dict, top_k: int = 10, iou_threshold: float = 0.5) -> dict:
-    """Compare saved ranking scores with deterministic reranking, by case and genre."""
+    """Compare original and deterministic-reranked scores per video and genre."""
     cases_out = []
-    before_predictions: list[dict] = []
-    after_predictions: list[dict] = []
-    all_truth: list[dict] = []
-    genre_truth: dict[str, list[dict]] = {}
+    genre_before: dict[str, list[float]] = {}
+    genre_after: dict[str, list[float]] = {}
 
     for case in manifest["cases"]:
         genre = case["genre"].strip().lower()
         original = copy.deepcopy(case["predictions"])
         reranked = rank_candidates(copy.deepcopy(original))
         truth = copy.deepcopy(case["groundTruth"])
-        before_metrics = evaluate_candidates(original, truth, top_k, iou_threshold)
-        after_metrics = evaluate_candidates(reranked, truth, top_k, iou_threshold)
+        before = evaluate_candidates(original, truth, top_k, iou_threshold)
+        after = evaluate_candidates(reranked, truth, top_k, iou_threshold)
+        genre_before.setdefault(genre, []).append(before["recallAtK"])
+        genre_after.setdefault(genre, []).append(after["recallAtK"])
         cases_out.append({
             "id": case["id"],
             "genre": genre,
-            "before": before_metrics,
-            "after": after_metrics,
+            "before": before,
+            "after": after,
         })
-        before_predictions.extend({**p, "genre": genre} for p in original)
-        after_predictions.extend({**p, "genre": genre} for p in reranked)
-        all_truth.extend({**t, "genre": genre} for t in truth)
-        genre_truth.setdefault(genre, []).extend(truth)
 
-    before_by_genre = evaluate_by_genre(before_predictions, all_truth, top_k, iou_threshold)
-    after_by_genre = evaluate_by_genre(after_predictions, all_truth, top_k, iou_threshold)
+    before_per_genre = {genre: _mean(values) for genre, values in sorted(genre_before.items())}
+    after_per_genre = {genre: _mean(genre_after[genre]) for genre in sorted(genre_after)}
     return {
         "manifestVersion": manifest["version"],
         "caseCount": len(cases_out),
         "topK": top_k,
         "iouThreshold": iou_threshold,
         "baseline": {
-            "perGenre": before_by_genre["perGenreRecallAtK"],
-            "macroRecallAtK": before_by_genre["macroRecallAtK"],
+            "perGenreMeanRecallAtK": before_per_genre,
+            "macroRecallAtK": _mean(list(before_per_genre.values())),
         },
         "reranked": {
-            "perGenre": after_by_genre["perGenreRecallAtK"],
-            "macroRecallAtK": after_by_genre["macroRecallAtK"],
+            "perGenreMeanRecallAtK": after_per_genre,
+            "macroRecallAtK": _mean(list(after_per_genre.values())),
         },
         "cases": cases_out,
         "interpretation": (
-            "Offline metrics on supplied human-curated labels only. A positive or negative "
-            "difference is not generalizable without a representative, held-out dataset."
+            "Offline metrics on supplied human-curated labels only. Results are averaged "
+            "per video before genre aggregation; timestamps from different videos are not "
+            "compared. A difference is not generalizable without a representative held-out set."
         ),
     }
 
@@ -134,7 +126,7 @@ def run_benchmark(manifest: dict, top_k: int = 10, iou_threshold: float = 0.5) -
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest", help="Path to a version-1 JSON benchmark manifest")
-    parser.add_argument("--top-k", type=int, default=10, help="Ranked candidates evaluated per case (default: 10)")
+    parser.add_argument("--top-k", type=int, default=10, help="Ranked candidates evaluated per video (default: 10)")
     parser.add_argument("--iou-threshold", type=float, default=0.5, help="Temporal IoU match threshold (default: 0.5)")
     parser.add_argument("--output", help="Optional path to write JSON results; stdout otherwise")
     args = parser.parse_args(argv)
@@ -143,8 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     if not math.isfinite(args.iou_threshold) or not 0 <= args.iou_threshold <= 1:
         parser.error("--iou-threshold must be between 0 and 1")
     try:
-        manifest = load_manifest(args.manifest)
-        report = run_benchmark(manifest, args.top_k, args.iou_threshold)
+        report = run_benchmark(load_manifest(args.manifest), args.top_k, args.iou_threshold)
     except ValueError as exc:
         print(f"benchmark error: {exc}", file=sys.stderr)
         return 2
