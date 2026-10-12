@@ -30,6 +30,8 @@ def test_render_segments_preserve_valid_disjoint_source_ranges():
     ({"duration": 3, "width": 1080, "height": 1920}, 100, 3),
     ({"duration": 0, "width": 1080, "height": 1920}, 2048, 3),
     ({"duration": 3, "width": None, "height": 1920}, 2048, 3),
+    ({"duration": 3, "width": float("nan"), "height": 1920}, 2048, 3),
+    ({"duration": 3, "width": "1080", "height": 1920}, 2048, 3),
     ({"duration": 8, "width": 1080, "height": 1920}, 2048, 3),
 ])
 def test_render_output_rejects_empty_or_invalid_video(metadata, size, expected):
