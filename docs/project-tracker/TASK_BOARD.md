@@ -18,3 +18,5 @@ Priorities: P0 blocks trustworthy processing; P1 reliability/quality; P2 product
 
 ## Execution order
 CF-001 baseline is recorded; see `TEST_AND_FAILURE_LOG.md` for failures that keep the product baseline from being green. CF-002 still needs a safe worker runtime and deployment context. CF-005 is complete at focused unit-test and contract-review level; it has no commit and no end-to-end verification. The unowned CF-007 patch must not be integrated until its author claims ownership and provides a migration plan. Do not mark a task complete until evidence is appended to TEST_AND_FAILURE_LOG.md.
+
+| CF-012 | P1 | AI | Add transcript-independent multimodal event candidate proposals | CF-001 | Unit tests pass; candidates have bounded times, evidence provenance, and merge into /v1/analyze without invented semantic categories | IN REVIEW — PR #18; CI pending |
