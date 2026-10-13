@@ -76,11 +76,23 @@ export async function ensureLocalStorage(key:string){
   if(existsSync(file))return file;
   if(!isObjectStorage())throw new Error("Storage file not found: "+key);
   await mkdir(path.dirname(file),{recursive:true});
-  const {bucket}=s3Config();
-  const out=await s3().send(new GetObjectCommand({Bucket:bucket,Key:key}));
-  if(!out.Body)throw new Error("Object storage returned no body");
-  await new Promise<void>((resolve,reject)=>{const ws=createWriteStream(file);(out.Body as any).pipe(ws);ws.on("finish",resolve);ws.on("error",reject)});
-  return file;
+  const temporary=file+".download-"+randomUUID()+".tmp";
+  const client=s3();
+  try{
+    const {bucket}=s3Config();
+    const out=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}));
+    if(!out.Body)throw new Error("Object storage returned no body");
+    // Do not leave a truncated cache file behind if a remote stream fails.
+    // Publish the local copy atomically only after the full body is written.
+    await pipeline(out.Body as any,createWriteStream(temporary,{flags:"wx"}));
+    await rename(temporary,file);
+    return file;
+  }catch(error){
+    await unlink(temporary).catch(()=>{});
+    throw error;
+  }finally{
+    client.destroy();
+  }
 }
 export async function headStorage(key:string){
   if(!isObjectStorage()){const s=await stat(storagePath(key));return {size:s.size,contentType:undefined as string|undefined}}
