@@ -218,3 +218,32 @@ test("object storage cache download cleans up partial data after a stream error"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("local ranged reads return requested bytes and preserve total size metadata", async () => {
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { Readable } = await import("node:stream");
+  const { getStorageRange, saveStream } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-range-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "local";
+
+  try {
+    const bytes = Buffer.from("0123456789");
+    await saveStream("projects/project-1/range.bin", Readable.from([bytes]));
+    const result = await getStorageRange("projects/project-1/range.bin", 3, 6);
+    const chunks: Buffer[] = [];
+    for await (const chunk of Readable.fromWeb(result.body)) chunks.push(Buffer.from(chunk));
+    assert.equal(Buffer.concat(chunks).toString(), "3456");
+    assert.equal(result.size, 10);
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    await rm(root, { recursive: true, force: true });
+  }
+});
