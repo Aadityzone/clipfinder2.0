@@ -93,6 +93,7 @@ def test_thumbnail_route_bounds_ffmpeg_execution(monkeypatch, tmp_path):
         assert kwargs["timeout"] == 300
         raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=300)
 
+    monkeypatch.setattr(main.os.path, "isfile", lambda _path: True)
     with patch("subprocess.run", side_effect=timeout):
         response = client.post(
             "/v1/thumbnail",
@@ -105,3 +106,34 @@ def test_thumbnail_route_bounds_ffmpeg_execution(monkeypatch, tmp_path):
 
     assert response.status_code == 500
     assert "timed out" in response.json()["detail"].lower()
+
+
+def test_thumbnail_route_returns_not_found_for_missing_source(monkeypatch, tmp_path):
+    monkeypatch.setattr(main.os.path, "isfile", lambda _path: False)
+    response = client.post(
+        "/v1/thumbnail",
+        json={
+            "input_path": str(tmp_path / "missing.mp4"),
+            "output_path": str(tmp_path / "thumbnail.jpg"),
+            "time": 1.5,
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Media file not found"
+
+
+def test_thumbnail_route_rejects_empty_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(main.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(main.os.path, "getsize", lambda _path: 0)
+    with patch("subprocess.run") as run:
+        response = client.post(
+            "/v1/thumbnail",
+            json={
+                "input_path": str(tmp_path / "source.mp4"),
+                "output_path": str(tmp_path / "thumbnail.jpg"),
+                "time": 1.5,
+            },
+        )
+    assert run.call_count == 1
+    assert response.status_code == 500
+    assert "empty" in response.json()["detail"]
