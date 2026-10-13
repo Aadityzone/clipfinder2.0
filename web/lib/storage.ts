@@ -121,7 +121,16 @@ export async function getStorageRange(key:string,start?:number,end?:number){
   const client=s3();
   try{
     const o=await client.send(new GetObjectCommand({Bucket:bucket,Key:key,Range}));
-    return {body:o.Body as any,size:Number(o.ContentLength||0),contentType:o.ContentType};
+    const body=o.Body as any;
+    if(body && typeof body.once==="function"){
+      const closeClient=()=>client.destroy();
+      body.once("end",closeClient);
+      body.once("error",closeClient);
+      body.once("close",closeClient);
+    }else{
+      client.destroy();
+    }
+    return {body,size:Number(o.ContentLength||0),contentType:o.ContentType};
   }catch(error){
     client.destroy();
     throw error;
