@@ -9,6 +9,11 @@ import { Upload } from "@aws-sdk/lib-storage";
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
 export function storagePath(key:string){
   if(!key || key.includes("\0"))throw new Error("Storage key must be a non-empty relative path");
+  // Reject Windows drive/UNC paths even when the app runs on POSIX, where
+  // path.resolve would otherwise treat them as harmless relative filenames.
+  if(/^[a-zA-Z]:[\\/]/.test(key)||key.startsWith("\\\\" )||key.startsWith("//")){
+    throw new Error("Storage key must stay within MEDIA_STORAGE_ROOT");
+  }
   const root=storageRoot();
   const target=path.resolve(root,key);
   const relative=path.relative(root,target);
