@@ -110,3 +110,58 @@ test("failed stream uploads never publish partial files or leave temporary artif
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("deleteStorage removes local files and tolerates already-missing files", async () => {
+  const { mkdtemp, readFile, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { Readable } = await import("node:stream");
+  const { deleteStorage, saveStream } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-delete-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "local";
+
+  try {
+    const key = "projects/project-1/deletable.mp4";
+    const saved = await saveStream(key, Readable.from([Buffer.from("delete-me")]));
+    assert.equal((await readFile(saved)).toString(), "delete-me");
+    await deleteStorage(key);
+    await assert.rejects(stat(saved));
+    await assert.doesNotReject(deleteStorage(key));
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("failed remote-cache download leaves no partial local object", async () => {
+  const { mkdtemp, readdir, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { ensureLocalStorage } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-download-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  const previousBucket = process.env.S3_BUCKET;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "s3";
+  process.env.S3_BUCKET = "unit-test-bucket";
+
+  try {
+    await assert.rejects(ensureLocalStorage("projects/project-1/source.mp4"));
+    await assert.rejects(stat(path.join(root, "projects/project-1/source.mp4")));
+    assert.deepEqual(await readdir(path.join(root, "projects/project-1")), []);
+  } finally {
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    if (previousBucket === undefined) delete process.env.S3_BUCKET;
+    else process.env.S3_BUCKET = previousBucket;
+    await rm(root, { recursive: true, force: true });
+  }
+});
