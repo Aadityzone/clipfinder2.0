@@ -74,7 +74,12 @@ export async function saveStream(key:string,stream:NodeJS.ReadableStream){
 export async function putFile(key:string,filePath:string,mimeType?:string){
   if(!isObjectStorage())return;
   const {bucket}=s3Config();
-  await new Upload({client:s3(),params:{Bucket:bucket,Key:key,Body:createReadStream(filePath),ContentType:mimeType}}).done();
+  const client=s3();
+  try{
+    await new Upload({client,params:{Bucket:bucket,Key:key,Body:createReadStream(filePath),ContentType:mimeType}}).done();
+  }finally{
+    client.destroy();
+  }
 }
 export async function ensureLocalStorage(key:string){
   const file=storagePath(key);
@@ -101,14 +106,26 @@ export async function ensureLocalStorage(key:string){
 }
 export async function headStorage(key:string){
   if(!isObjectStorage()){const s=await stat(storagePath(key));return {size:s.size,contentType:undefined as string|undefined}}
-  const {bucket}=s3Config();const h=await s3().send(new HeadObjectCommand({Bucket:bucket,Key:key}));
-  return {size:Number(h.ContentLength||0),contentType:h.ContentType};
+  const {bucket}=s3Config();
+  const client=s3();
+  try{
+    const h=await client.send(new HeadObjectCommand({Bucket:bucket,Key:key}));
+    return {size:Number(h.ContentLength||0),contentType:h.ContentType};
+  }finally{
+    client.destroy();
+  }
 }
 export async function getStorageRange(key:string,start?:number,end?:number){
   if(!isObjectStorage())return {body:(await import("node:stream")).Readable.toWeb(createReadStream(storagePath(key),start===undefined?undefined:{start,end})) as any,size:(await stat(storagePath(key))).size,contentType:undefined as string|undefined};
   const {bucket}=s3Config();const Range=start===undefined?undefined:`bytes=${start}-${end??""}`;
-  const o=await s3().send(new GetObjectCommand({Bucket:bucket,Key:key,Range}));
-  return {body:o.Body as any,size:Number(o.ContentLength||0),contentType:o.ContentType};
+  const client=s3();
+  try{
+    const o=await client.send(new GetObjectCommand({Bucket:bucket,Key:key,Range}));
+    return {body:o.Body as any,size:Number(o.ContentLength||0),contentType:o.ContentType};
+  }catch(error){
+    client.destroy();
+    throw error;
+  }
 }
 export async function deleteStorage(key:string){
   const file=storagePath(key);
