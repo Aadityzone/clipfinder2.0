@@ -3,7 +3,7 @@ import { mkdir, stat, writeFile, unlink, rename } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
-import { S3Client, GetObjectCommand, HeadObjectCommand, HeadBucketCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, HeadObjectCommand, HeadBucketCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
@@ -104,5 +104,15 @@ export async function getStorageRange(key:string,start?:number,end?:number){
   const {bucket}=s3Config();const Range=start===undefined?undefined:`bytes=${start}-${end??""}`;
   const o=await s3().send(new GetObjectCommand({Bucket:bucket,Key:key,Range}));
   return {body:o.Body as any,size:Number(o.ContentLength||0),contentType:o.ContentType};
+}
+export async function deleteStorage(key:string){
+  const file=storagePath(key);
+  if(isObjectStorage()){
+    const {bucket}=s3Config();
+    const client=s3();
+    try{await client.send(new DeleteObjectCommand({Bucket:bucket,Key:key}));}
+    finally{client.destroy();}
+  }
+  await unlink(file).catch((error:any)=>{if(error?.code!=="ENOENT")throw error});
 }
 export function openStorage(key:string){return createReadStream(storagePath(key))}
