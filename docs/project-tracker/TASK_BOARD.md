@@ -12,7 +12,7 @@ Priorities: P0 blocks trustworthy processing; P1 reliability/quality; P2 product
 | CF-006 | P1 | Rendering | Verify render output before marking READY | CF-003 | File exists, non-empty, ffprobe/decode validation passes; otherwise FAILED | IN_PROGRESS — Editor/exports assignment added source-range and ffprobe output checks; end-to-end artifact remains unverified |
 | CF-007 | P1 | Backend | Add worker health/heartbeat and operational diagnostics | CF-002 | Health/status distinguishes API, DB, storage and worker | VISIBLE PATCH, OWNER UNCONFIRMED — 7 pure unit tests pass; schema migration and integration ownership unresolved |
 | CF-008 | P1 | Backend/QA | Audit usage quotas, trial limits, duplicate-job protection | CF-003 | Server-enforced monthly source-hour quota, atomic reservation, 80% warning, hard cap | NOT_STARTED |
-| CF-009 | P1 | Storage | Test local and S3 storage round trips and cleanup | CF-001 | Upload/read/delete tests pass; failed jobs clean temporary files safely | NOT_STARTED |
+| CF-009 | P1 | Storage | Test local and S3 storage round trips and cleanup | CF-001 | Upload/read/delete tests pass; failed jobs clean temporary files safely | IN PROGRESS — local round-trip/delete/range tests and mocked interrupted S3 cache-download tests added in PR #18; live S3 round trip and worker temp-file cleanup remain unverified |
 | CF-010 | P2 | Product | Verify subscription checkout/webhooks/entitlements | CF-008 | Paid plan entitlements are server-side and tested against Stripe events | NOT_STARTED |
 | CF-011 | P2 | QA | Full pipeline integration fixture and failure matrix | CF-003, CF-006 | Invalid URL, corrupt media, no audio, provider failure, cancellation and retries tested | NOT_STARTED |
 
@@ -28,3 +28,7 @@ CF-001 baseline is recorded; see `TEST_AND_FAILURE_LOG.md` for failures that kee
 
 
 | CF-015 | P0 | AI | Make optional media-analysis stages bounded and fault-isolated | CF-012 | Missing files and FFmpeg timeouts degrade gracefully; failed windows never invent energy; scene evidence reaches reranker | IMPLEMENTED IN PR #18; latest CI pending |
+
+
+## Storage follow-up — 2026-10-14
+CF-009 remains in progress, not complete. PR #18 now adds atomic local-cache downloads from S3, cleanup of partial upload/download files, idempotent local deletion plus S3 object deletion, cross-platform path validation, and explicit object-store client cleanup. New regression tests cover interrupted streams and local byte-range reads. Current latest-head CI has not yet completed; live S3 credentials/bucket and worker end-to-end cleanup have not been tested.
