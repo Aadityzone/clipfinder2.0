@@ -91,3 +91,12 @@ For each run, record:
   The output directory must be writable on the AI service host/container. Set `AI_SERVICE_URL` and optionally `AI_SERVICE_SECRET` in the environment; do not commit secrets. Use only media you have permission to process.
 
 - CI update for commit `30f8050ad7e1f4d05a5b5371553f100f908c7dd2`: Python suite **123 passed**; web Prisma generation, schema validation, typecheck, storage tests, lint, and build all passed. This includes the real-video smoke harness unit tests and atomic upload cleanup test. Newer follow-up tests for zero-duration candidate clamping and timeout coverage across every FFmpeg render stage, plus the CI concurrency update, remain unverified until latest-head Actions complete.
+
+
+## Storage hardening follow-up (2026-10-14)
+- Added atomic local-cache publication for object-store downloads: stream into a unique temporary sibling, rename only after full success, and remove temporary data on failure.
+- Added storage deletion for local files and S3 objects; local deletion is idempotent for already-missing files.
+- Reject Windows drive-qualified and UNC-style keys even when the service is running on POSIX, preventing cross-platform absolute-path confusion.
+- Added tests for local delete/idempotence, failed object download cleanup, interrupted object streams, and Windows path rejection.
+- These changes are committed to PR #18. CI is queued/pending on the latest head; do not mark the new storage cases passed until the current run completes.
+- No live S3 bucket or credentials were used. The interrupted-stream test stubs the AWS SDK client, and real S3 integration remains unverified.
