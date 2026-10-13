@@ -2,6 +2,57 @@ import json
 import os
 from urllib.request import Request, urlopen
 
+
+def _response_text(data: dict) -> str:
+    """Extract generated text from both SDK-style and raw Responses API payloads."""
+    direct = data.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
+    chunks = []
+    for item in data.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for part in item.get("content", []):
+            if isinstance(part, dict) and part.get("type") in {"output_text", "text"}:
+                value = part.get("text")
+                if isinstance(value, str) and value.strip():
+                    chunks.append(value.strip())
+    return "\n".join(chunks)
+
+
+def _parse_rankings(raw: str) -> dict[int, dict]:
+    """Parse model rankings defensively; ignore malformed and out-of-range indexes."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1]
+        if raw.rstrip().endswith("```"):
+            raw = raw.rstrip()[:-3].strip()
+    parsed = json.loads(raw)
+    if isinstance(parsed, dict):
+        parsed = parsed.get("candidates", parsed.get("rankings", []))
+    if not isinstance(parsed, list):
+        return {}
+
+    ranked = {}
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("i")
+        try:
+            index = int(index)
+            score = float(item.get("score"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if index < 0 or not 0 <= score <= 100:
+            continue
+        ranked[index] = {
+            "score": score,
+            "rationale": str(item.get("rationale") or "").strip(),
+        }
+    return ranked
+
+
 def score_candidates(candidates: list[dict], transcript: str, instruction: str | None = None) -> list[dict]:
     key = os.getenv("OPENAI_API_KEY")
     if not key or not candidates:
@@ -40,17 +91,17 @@ def score_candidates(candidates: list[dict], transcript: str, instruction: str |
     try:
         with urlopen(req, timeout=45) as resp:
             data = json.loads(resp.read())
-        raw = data.get("output_text", "")
-        ranked = json.loads(raw)
-        by = {int(x["i"]): x for x in ranked
-              if isinstance(x, dict) and str(x.get("i", "")).isdigit()}
-        for i, c in enumerate(candidates):
-            x = by.get(i)
-            if x:
-                llm = max(0, min(100, float(x.get("score", c["score"]))))
-                c["score"] = round(c["score"] * .55 + llm * .45, 2)
-                c["rationale"] = str(x.get("rationale") or c.get("rationale") or "")
-                c.setdefault("features", {})["llmScore"] = llm
+        ranked = _parse_rankings(_response_text(data))
+        for i, candidate in enumerate(candidates[:80]):
+            item = ranked.get(i)
+            if item:
+                llm_score = item["score"]
+                candidate["score"] = round(float(candidate.get("score", 0)) * .55 + llm_score * .45, 2)
+                if item["rationale"]:
+                    candidate["rationale"] = item["rationale"]
+                candidate.setdefault("features", {})["llmScore"] = llm_score
     except Exception:
+        # LLM scoring is an optional enhancement; a provider failure must not
+        # break the deterministic transcript/audio/visual ranking pipeline.
         pass
     return candidates
