@@ -247,3 +247,46 @@ test("local ranged reads return requested bytes and preserve total size metadata
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("object-store deletion removes the remote key and local cache", async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { DeleteObjectCommand, S3Client } = await import("@aws-sdk/client-s3");
+  const { deleteStorage } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-s3-delete-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  const previousBucket = process.env.S3_BUCKET;
+  const originalSend = S3Client.prototype.send;
+  const commands: unknown[] = [];
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "s3";
+  process.env.S3_BUCKET = "unit-test-bucket";
+  S3Client.prototype.send = async function(command: any) {
+    commands.push(command);
+    return {} as any;
+  } as any;
+
+  try {
+    const key = "projects/project-1/delete-me.mp4";
+    const localFile = path.join(root, key);
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(path.dirname(localFile), { recursive: true }));
+    await writeFile(localFile, "cached");
+    await deleteStorage(key);
+    assert.equal(commands.length, 1);
+    assert.ok(commands[0] instanceof DeleteObjectCommand);
+    assert.equal((commands[0] as any).input.Bucket, "unit-test-bucket");
+    assert.equal((commands[0] as any).input.Key, key);
+    await assert.rejects(readFile(localFile));
+  } finally {
+    S3Client.prototype.send = originalSend;
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    if (previousBucket === undefined) delete process.env.S3_BUCKET;
+    else process.env.S3_BUCKET = previousBucket;
+    await rm(root, { recursive: true, force: true });
+  }
+});
