@@ -143,19 +143,23 @@ test("failed remote-cache download leaves no partial local object", async () => 
   const { mkdtemp, readdir, rm, stat } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { ensureLocalStorage } = await import("./storage");
+  const { S3Client } = await import("@aws-sdk/client-s3");
   const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-download-"));
   const previousRoot = process.env.MEDIA_STORAGE_ROOT;
   const previousProvider = process.env.STORAGE_PROVIDER;
   const previousBucket = process.env.S3_BUCKET;
+  const originalSend = S3Client.prototype.send;
   process.env.MEDIA_STORAGE_ROOT = root;
   process.env.STORAGE_PROVIDER = "s3";
   process.env.S3_BUCKET = "unit-test-bucket";
+  S3Client.prototype.send = async () => { throw new Error("simulated object missing"); };
 
   try {
-    await assert.rejects(ensureLocalStorage("projects/project-1/source.mp4"));
+    await assert.rejects(ensureLocalStorage("projects/project-1/source.mp4"), /simulated object missing/);
     await assert.rejects(stat(path.join(root, "projects/project-1/source.mp4")));
     assert.deepEqual(await readdir(path.join(root, "projects/project-1")), []);
   } finally {
+    S3Client.prototype.send = originalSend;
     if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
     else process.env.MEDIA_STORAGE_ROOT = previousRoot;
     if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
