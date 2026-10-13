@@ -100,3 +100,6 @@ For each run, record:
 - Added tests for local delete/idempotence, failed object download cleanup, interrupted object streams, and Windows path rejection.
 - These changes are committed to PR #18. CI is queued/pending on the latest head; do not mark the new storage cases passed until the current run completes.
 - No live S3 bucket or credentials were used. The interrupted-stream test stubs the AWS SDK client, and real S3 integration remains unverified.
+
+- Additional follow-up: thumbnail endpoint now rejects missing source media, handles output paths without a parent directory, and rejects missing/tiny thumbnail artifacts. Regression tests cover 404 behavior, empty output, and timeout handling. CI has not yet completed on this follow-up head.
+- Storage now includes a local byte-range test and a mocked S3 delete lifecycle test; these are contract/unit checks only, not evidence of live object-store access.
