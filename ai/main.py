@@ -127,12 +127,14 @@ def probe(b: ProbeRequest, x_ai_secret: str | None = Header(default=None)):
 def thumbnail(b: ThumbnailRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
-        os.makedirs(os.path.dirname(b.output_path), exist_ok=True)
+        if not os.path.isfile(b.input_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        os.makedirs(os.path.dirname(b.output_path) or ".", exist_ok=True)
         import subprocess
         subprocess.run(["ffmpeg", "-y", "-ss", str(max(0, b.time)), "-i", b.input_path,
                         "-frames:v", "1", "-q:v", "2", b.output_path], check=True, timeout=300)
-        if not os.path.isfile(b.output_path):
-            raise RuntimeError("Thumbnail was not created")
+        if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 256:
+            raise RuntimeError("Thumbnail output was not created or is empty")
         return {"output_path": b.output_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
