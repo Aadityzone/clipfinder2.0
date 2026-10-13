@@ -171,3 +171,46 @@ test("storagePath rejects Windows drive-qualified absolute keys", () => {
   assert.throws(() => storagePath("C:\\outside.mp4"), /stay within MEDIA_STORAGE_ROOT/);
   assert.throws(() => storagePath("\\\\server\\share\\outside.mp4"), /stay within MEDIA_STORAGE_ROOT/);
 });
+
+
+test("object storage cache download cleans up partial data after a stream error", async () => {
+  const { mkdtemp, readFile, readdir, rm, stat } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { Readable } = await import("node:stream");
+  const { ensureLocalStorage } = await import("./storage");
+  const root = await mkdtemp(path.join(tmpdir(), "clipfinder-storage-stream-error-"));
+  const previousRoot = process.env.MEDIA_STORAGE_ROOT;
+  const previousProvider = process.env.STORAGE_PROVIDER;
+  const previousBucket = process.env.S3_BUCKET;
+  process.env.MEDIA_STORAGE_ROOT = root;
+  process.env.STORAGE_PROVIDER = "s3";
+  process.env.S3_BUCKET = "unit-test-bucket";
+  const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
+  const send = S3Client.prototype.send;
+  S3Client.prototype.send = async function(command: any) {
+    if (command instanceof GetObjectCommand) {
+      async function* brokenBody() {
+        yield Buffer.from("partial-remote-data");
+        throw new Error("simulated S3 stream interruption");
+      }
+      return { Body: Readable.from(brokenBody()) } as any;
+    }
+    throw new Error("Unexpected S3 command");
+  } as any;
+
+  try {
+    const target = path.join(root, "projects/project-1/source.mp4");
+    await assert.rejects(ensureLocalStorage("projects/project-1/source.mp4"), /simulated S3 stream interruption/);
+    await assert.rejects(stat(target));
+    assert.deepEqual(await readdir(path.dirname(target)), []);
+  } finally {
+    S3Client.prototype.send = send;
+    if (previousRoot === undefined) delete process.env.MEDIA_STORAGE_ROOT;
+    else process.env.MEDIA_STORAGE_ROOT = previousRoot;
+    if (previousProvider === undefined) delete process.env.STORAGE_PROVIDER;
+    else process.env.STORAGE_PROVIDER = previousProvider;
+    if (previousBucket === undefined) delete process.env.S3_BUCKET;
+    else process.env.S3_BUCKET = previousBucket;
+    await rm(root, { recursive: true, force: true });
+  }
+});
