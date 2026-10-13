@@ -165,3 +165,9 @@ test("failed remote-cache download leaves no partial local object", async () => 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("storagePath rejects Windows drive-qualified absolute keys", () => {
+  assert.throws(() => storagePath("C:\\outside.mp4"), /stay within MEDIA_STORAGE_ROOT/);
+  assert.throws(() => storagePath("\\\\server\\share\\outside.mp4"), /stay within MEDIA_STORAGE_ROOT/);
+});
