@@ -136,6 +136,8 @@ def thumbnail(b: ThumbnailRequest, x_ai_secret: str | None = Header(default=None
         if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 256:
             raise RuntimeError("Thumbnail output was not created or is empty")
         return {"output_path": b.output_path}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
