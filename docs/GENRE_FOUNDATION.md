@@ -54,3 +54,29 @@ and human-labeled candidate ranges. Use `ai.services.evaluation.evaluate_ranked_
 Genre profiles currently provide explainable heuristics, not trained classifiers
 or proof of genre-specific accuracy. Upgrade one genre at a time after the shared
 pipeline is stable and measurable.
+
+
+## Running a labelled benchmark
+
+Create a JSON file containing the ranked predictions and human-labelled moments:
+
+```json
+{
+  "predictions": [
+    {"start": 61.2, "end": 84.5, "score": 91.3}
+  ],
+  "ground_truth": [
+    {"start": 64.0, "end": 83.0, "label": "example moment"}
+  ]
+}
+```
+
+Run from the repository root:
+
+```bash
+PYTHONPATH=. python ai/scripts/evaluate_highlights.py path/to/benchmark.json --top-k 10 --iou 0.5
+```
+
+Keep separate benchmark files per genre and split them by source video, not by
+individual clips from the same video. Never evaluate on the same labelled videos
+used to tune cue weights and then present the result as an independent score.
