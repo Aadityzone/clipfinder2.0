@@ -67,6 +67,7 @@ def run_pipeline(
     language: str | None = None,
     genre: str = "auto",
     top: int = 3,
+    source_label: str | None = None,
 ) -> dict:
     if not source.is_file():
         raise FileNotFoundError(f"Source video does not exist: {source}")
@@ -126,7 +127,7 @@ def run_pipeline(
 
     report = {
         "status": "passed" if rendered else "no_candidates",
-        "source": str(source.resolve()),
+        "source": source_label or str(source.resolve()),
         "media": {
             "duration": duration,
             "width": metadata.get("width"),
@@ -174,7 +175,8 @@ def main() -> int:
             with tempfile.TemporaryDirectory(prefix="clipfinder-ai-smoke-") as temporary:
                 source = Path(download(args.url, temporary))
                 report = run_pipeline(
-                    source, args.out_dir, language=args.language, genre=args.genre, top=args.top
+                    source, args.out_dir, language=args.language, genre=args.genre, top=args.top,
+                    source_label=args.url,
                 )
         else:
             report = run_pipeline(

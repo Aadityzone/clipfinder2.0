@@ -748,6 +748,12 @@ and media tools; it is not a mocked test. The first run may download Whisper
 model weights. A smoke-test pass proves that specific source completed the
 pipeline, not that the selected moments are universally high quality.
 
+To run the same test on GitHub without setting up a local environment, open
+**Actions → Real AI Video Smoke Test → Run workflow**, enter a public source URL
+you have permission to process, select its genre, and run it. The workflow
+uploads the transcript, JSON report, and rendered MP4s as a short-lived artifact.
+It uses the local Whisper model and does not require a cloud LLM API key.
+
 ### Measure highlight quality
 
 Use human-labelled benchmark JSON files with `predictions`, `ground_truth`,
