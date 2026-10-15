@@ -75,7 +75,7 @@ def test_request_body_includes_labeled_visual_evidence():
 
 def test_unsupported_multimodal_provider_falls_back_to_text(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr(llm, "_candidate_frame_data_url", lambda *_args: "data:image/jpeg;base64,ZmFrZQ==")
+    monkeypatch.setattr(llm, "_candidate_frame_data_urls", lambda *_args, **_kwargs: {0: "data:image/jpeg;base64,ZmFrZQ=="})
     requests = []
 
     def fake_urlopen(request, **_kwargs):
