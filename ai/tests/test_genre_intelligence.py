@@ -41,3 +41,22 @@ def test_auto_mode_records_detected_genre_and_abstains_on_weak_evidence():
     unknown = [{"text": "Hello there.", "score": 40, "features": {}}]
     result = apply_genre_profile(unknown, "Hello there.", "auto")
     assert result[0]["features"]["genreProfile"]["active"] == "general"
+
+
+
+def test_genre_cues_do_not_match_inside_unrelated_words():
+    # "skill" must not trigger the gaming cue "kill".
+    genre, scores = infer_genre("The developer explains a useful skill for beginners.")
+    assert scores["gaming"] == 0
+    assert genre == "general"
+
+
+def test_auto_genre_detection_abstains_when_top_profiles_tie():
+    genre, scores = infer_genre(
+        "The episode includes an interview and a game review with a final round."
+    )
+    # A tie should not be resolved by dictionary ordering.
+    top = max(scores.values())
+    leaders = [name for name, score in scores.items() if score == top]
+    if len(leaders) > 1:
+        assert genre == "general"
