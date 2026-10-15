@@ -63,4 +63,3 @@ def test_highlight_cues_do_not_match_inside_unrelated_words():
     assert not _contains_cue("a useful skill for beginners", "kill")
     assert _contains_cue("That was a huge win!", "win")
     assert _contains_cue("I can't believe it", "can't believe")
-\n
