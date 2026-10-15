@@ -103,6 +103,42 @@ def multimodal_event_candidates(
         evidence = dict(event["evidence"])
         evidence["eventKind"] = event["kind"]
         evidence["eventStrength"] = round(event["strength"], 3)
+        window_visual = [
+            row for row in visual_samples
+            if start <= _number(row.get("time"), -1) <= end
+        ]
+        window_audio = [
+            row for row in audio_windows
+            if _number(row.get("end")) > start and _number(row.get("start")) < end
+        ]
+        window_screen = [
+            row for row in screen_samples
+            if start <= _number(row.get("time"), -1) <= end
+        ]
+        window_faces = [
+            row for row in media.get("vision", {}).get("faces", []) or []
+            if start <= _number(row.get("time"), -1) <= end
+        ]
+        evidence["visualChange"] = round(
+            sum(_number(row.get("visualChange")) for row in window_visual) / len(window_visual), 4
+        ) if window_visual else 0.0
+        evidence["motion"] = round(
+            sum(_number(row.get("motion")) for row in window_visual) / len(window_visual), 4
+        ) if window_visual else 0.0
+        evidence["faceHits"] = len(window_faces)
+        evidence["sceneHits"] = sum(1 for value in scenes if start <= _number(value, -1) <= end)
+        evidence["audioEnergy"] = round(
+            sum(_number(row.get("energy")) for row in window_audio) / len(window_audio), 4
+        ) if window_audio else 0.0
+        evidence["gameplayLikeRatio"] = round(
+            sum(1 for row in window_screen if row.get("gameplayLike")) / len(window_screen), 4
+        ) if window_screen else 0.0
+        evidence["onScreenActionLabels"] = sorted({
+            str(label) for row in window_screen for label in (row.get("actionLabels") or [])
+        })
+        evidence["onScreenText"] = " ".join(
+            str(row.get("ocrText") or "") for row in window_screen
+        )[:1200]
         proposals.append({
             "start": round(start, 3),
             "end": round(end, 3),
