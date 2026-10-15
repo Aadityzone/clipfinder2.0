@@ -28,6 +28,7 @@ import uuid
 import importlib.util
 import shutil
 import tempfile
+import subprocess
 
 app = FastAPI(title="Clip Finder AI", version="2.2.0")
 

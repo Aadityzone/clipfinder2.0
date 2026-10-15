@@ -84,7 +84,13 @@ if(j.type==="TRANSCRIBE"){
     continueAfterRange=sourceRange.endSeconds<sourceDurationS;
   }
   let transcript=sourceRange
-    ?await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId,metadata:{path:["sourceStartS"],equals:Number(sourceRange.startSeconds)}},orderBy:{createdAt:"desc"}})
+    ?await db.transcript.findFirst({where:{
+      mediaAssetId:p.mediaAssetId,
+      AND:[
+        {metadata:{path:["sourceStartS"],equals:Number(sourceRange.startSeconds)}},
+        {metadata:{path:["sourceEndS"],equals:Number(sourceRange.endSeconds)}},
+      ],
+    },orderBy:{createdAt:"desc"}})
     :await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId},orderBy:{createdAt:"desc"}});
   let duration=Number((transcript?.metadata as any)?.duration||0);
   if(!transcript){
@@ -120,7 +126,7 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
   const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});
   const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});
   const sourceRange=p.sourceRange||null;
-  const analysisVersion=sourceRange?"2.3.0-range-"+String(Number(sourceRange.startSeconds)):"2.3.0";
+  const analysisVersion=sourceRange?"2.3.0-range-"+String(Number(sourceRange.startSeconds))+"-"+String(Number(sourceRange.endSeconds)):"2.3.0";
   const existing=await db.analysis.findFirst({
     where:{projectId:project.id,model:"multimodal-heuristic-v2",version:analysisVersion},
     select:{id:true},

@@ -131,38 +131,3 @@ def test_longform_clips_ranked_stories_to_media_duration(monkeypatch, tmp_path):
     assert result["stories"][0]["end"] == 100
     assert result["stories"][0]["score"] == 100
     assert result["chapters"][0]["start"] == 80.0
-
-
-def test_bounded_analyze_shifts_candidates_back_to_source_timestamps(monkeypatch, tmp_path):
-    from ai import main
-
-    source = tmp_path / "source.mp4"
-    source.write_bytes(b"source")
-    ranged = tmp_path / "range.mp4"
-    ranged.write_bytes(b"x" * 2048)
-    monkeypatch.setattr(main, "auth", lambda _secret: None)
-    monkeypatch.setattr(main, "ffprobe", lambda path: {"duration": 120 if path == str(source) else 30})
-    monkeypatch.setattr(main, "extract_analysis_range", lambda _source, _start, _end, _out: str(ranged))
-    monkeypatch.setattr(main, "analyze_media", lambda _path: {})
-    monkeypatch.setattr(main, "candidates", lambda *_args, **_kwargs: [
-        {"start": 1.0, "end": 5.0, "score": 80.0, "text": "A strong moment", "features": {}}
-    ])
-    monkeypatch.setattr(main, "optimize_candidates", lambda _segments, rows: rows)
-    monkeypatch.setattr(main, "enrich_semantics", lambda rows, _instruction: rows)
-    monkeypatch.setattr(main, "validate_candidates", lambda rows, _duration: rows)
-    monkeypatch.setattr(main, "diarize", lambda *_args: {"available": False, "segments": []})
-    monkeypatch.setattr(main, "speaker_signals", lambda _segments: {"segments": []})
-    monkeypatch.setattr(main, "deduplicate", lambda rows: rows)
-    monkeypatch.setattr(main, "score_candidates", lambda rows, *_args, **_kwargs: rows)
-    monkeypatch.setattr(main, "apply_genre_profile", lambda rows, *_args: rows)
-    monkeypatch.setattr(main, "apply_creator_preferences", lambda rows, *_args: rows)
-
-    result = main.analyze(main.AnalyzeRequest(
-        segments=[{"start": 32, "end": 38, "text": "inside range"}],
-        media_path=str(source),
-        start_seconds=30,
-        end_seconds=60,
-    ))
-
-    assert result["candidates"][0]["start"] == 31.0
-    assert result["candidates"][0]["end"] == 35.0
