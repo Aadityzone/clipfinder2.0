@@ -166,6 +166,10 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
+    # Optimize transcript-centered candidates before adding visual-only event windows;
+    # the latter must keep their measured event timestamps rather than snap to speech.
+    if b.segments:
+        result = optimize_candidates(b.segments, result)
     requested_categories = {str(category).strip().lower().replace("_", " ") for category in b.categories}
     allow_visual_proposals = not requested_categories or bool(
         requested_categories & {"ai detect", "general", "all"}
@@ -175,10 +179,6 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             b.segments, media, media_duration, max_candidates=40
         ))
     result = enrich_semantics(result, b.instruction)
-    # Story-boundary optimization needs transcript anchors; visual proposals still
-    # remain valid when speech is absent, so don't drop them for an empty transcript.
-    if b.segments:
-        result = optimize_candidates(b.segments, result)
     # Enforce one genre-neutral contract before any downstream feature extraction.
     result = validate_candidates(result, media_duration)
     diarized = (
