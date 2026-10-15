@@ -40,5 +40,5 @@ jobs:
           cache-dependency-path: ai/requirements.txt
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r ai/requirements.txt
-      - run: python -m py_compile ai/main.py ai/schemas.py ai/transcribe.py ai/highlights.py ai/longform.py ai/services/render.py ai/services/media_intelligence.py ai/services/llm.py ai/services/dedup.py ai/services/captions.py
+      - run: python -m py_compile ai/main.py ai/schemas.py ai/transcribe.py ai/highlights.py ai/longform.py ai/services/render.py ai/services/media_intelligence.py ai/services/audio_intelligence.py ai/services/llm.py ai/services/dedup.py ai/services/captions.py
       - run: PYTHONPATH=. pytest -q
