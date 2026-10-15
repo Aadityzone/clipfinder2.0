@@ -47,6 +47,7 @@ def test_score_candidates_uses_raw_responses_payload(monkeypatch):
     assert result[0]["score"] == 78.0
     assert result[0]["rationale"] == "Excellent payoff"
     assert result[0]["features"]["llmScore"] == 100.0
+    assert result[0]["features"]["llmRanking"]["status"] == "completed"
 
 
 class _FakeResponse:
@@ -154,3 +155,18 @@ def test_ranking_capabilities_explicitly_reports_heuristic_fallback(monkeypatch)
 
     assert result["provider"] == "heuristic"
     assert result["configured"] is False
+
+def test_provider_failure_is_recorded_without_breaking_deterministic_scores(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
+
+    candidates = [{"start": 1, "end": 8, "score": 61, "text": "A moment", "features": {}}]
+    result = llm.score_candidates(candidates, "A moment")
+
+    assert result[0]["score"] == 61
+    assert result[0]["features"]["llmRanking"] == {
+        "provider": "openai",
+        "status": "unavailable",
+        "errorType": "TimeoutError",
+    }
+

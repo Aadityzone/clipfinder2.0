@@ -301,7 +301,19 @@ def score_candidates(
                 features["llmProvider"] = provider
                 if i in frame_urls:
                     features["llmVisualEvidence"] = True
-    except Exception:
-        # LLM is optional; deterministic ranking remains available if a provider is offline.
-        pass
+                features["llmRanking"] = {
+                    "provider": provider,
+                    "status": "completed",
+                    "visualEvidence": i in frame_urls,
+                }
+    except Exception as exc:
+        # Keep deterministic ranking available, but retain safe diagnostics so
+        # provider outages and malformed model output are not silently invisible.
+        for candidate in candidates[:80]:
+            features = candidate.setdefault("features", {})
+            features["llmRanking"] = {
+                "provider": provider,
+                "status": "unavailable",
+                "errorType": type(exc).__name__,
+            }
     return candidates
