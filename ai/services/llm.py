@@ -52,6 +52,14 @@ def ranking_capabilities() -> dict:
     }
 
 
+def _ollama_supports_vision(model: str) -> bool:
+    normalized = model.lower()
+    return any(
+        marker in normalized
+        for marker in ("qwen2.5vl", "qwen3-vl", "llava", "minicpm-v", "vision", "gemma3")
+    )
+
+
 def _ollama_response_text(data: dict) -> str:
     message = data.get("message")
     if isinstance(message, dict):
@@ -247,8 +255,12 @@ def score_candidates(
             "Treat it as partial visual context, not proof of an event over time."
         ),
     }
-    # Cap image payload size and reuse one decoder handle for all sampled frames.
-    frame_urls = _candidate_frame_data_urls(media_path, candidates, limit=12) if media_path else {}
+    # Sample frames only for providers/models that can accept image inputs.
+    can_see_frames = provider == "openai" or _ollama_supports_vision(model)
+    frame_urls = (
+        _candidate_frame_data_urls(media_path, candidates, limit=12)
+        if media_path and can_see_frames else {}
+    )
 
     def make_request(with_frames: bool) -> Request:
         frames = frame_urls if with_frames else {}
