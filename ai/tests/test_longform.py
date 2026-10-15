@@ -29,10 +29,13 @@ def test_longform_chapters_are_chronological_not_score_ordered():
     assert [chapter["start"] for chapter in result["chapters"]] == [10, 90]
 
 
-def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
+def test_longform_route_applies_llm_and_genre_ranking(monkeypatch, tmp_path):
     observed = {}
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"test")
 
     monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "ffprobe", lambda _path: {"duration": 10})
     monkeypatch.setattr(main, "stories", lambda _segments, limit=6: [{
         "start": 0, "end": 10, "score": 40, "title": "A story",
         "text": "A clutch changes the whole game.", "features": {},
@@ -59,13 +62,13 @@ def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
         segments=[{"start": 0, "end": 10, "text": "A clutch changes the whole game."}],
         instruction="Prioritize a clear payoff",
         genre="gaming",
-        media_path="/tmp/source.mp4",
+        media_path=str(media),
     ))
 
     assert result["title"] == "Test"
     assert observed["genre"] == "gaming"
     assert observed["instruction"] == "Prioritize a clear payoff"
-    assert observed["media_path"] == "/tmp/source.mp4"
+    assert observed["media_path"] == str(media)
     assert observed["rank_genre"] == "gaming"
     assert "clutch" in observed["transcript"]
 
