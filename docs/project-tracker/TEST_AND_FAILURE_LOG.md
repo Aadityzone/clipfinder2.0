@@ -75,3 +75,31 @@ For each run, record:
 - Synthetic FFmpeg artifact check: generated a 4-second `testsrc` + sine MP4 with FFmpeg 9.0.1; invoked `render(source, output, aspect='16:9', segments=[{'start':0.5,'end':3.5}])`; `ffprobe(output)` and `validate_render_output` passed. Observed duration 3.0 s, dimensions 1920x1080, size 91,033 bytes. The temporary fixture directory was removed afterward.
 - A separate two-segment render with captions reached `TemporaryDirectory` cleanup but exited with `PermissionError: [WinError 5] Access is denied` for the generated `%TEMP%\clipfinder-caption-*` path; the output was not treated as verified. No output from that attempt was retained in the workspace.
 - No database transaction, worker state transition, storage round-trip, browser export, or ranged download was executed. Those integration behaviors remain unverified.
+
+
+## Render timeout and real-video smoke harness (2026-10-12)
+- Earlier CI head `11da6b41704682e85801dec6dd75dd3588b04d52`: both Python and web jobs completed successfully. Python suite reported 118 passed; web Prisma generation/validation, typecheck, storage tests, lint and build all passed.
+- Added bounded FFmpeg render and thumbnail calls (300-second subprocess timeout), defensive finite-positive render dimension validation, and endpoint regression tests.
+- Added `ai/scripts/smoke_real_video.py` for a real authorized URL through `/v1/ingest`, `/v1/transcribe`, `/v1/analyze`, and `/v1/render`. It reports the output artifact metadata from the AI service; it explicitly does not claim Prisma worker or browser export coverage.
+- Added orchestration tests for the smoke harness. CI for the newest commits is queued/in progress at the time of this entry; no passing result is claimed for the newest head.
+- To run against a configured AI service (not production unless deliberately configured), from repository root:
+  ```bash
+  python -m py_compile ai/scripts/smoke_real_video.py
+  PYTHONPATH=. python -m pytest -q ai/tests/test_real_video_smoke.py
+  python -m ai.scripts.smoke_real_video --url "AUTHORIZED_VIDEO_URL" --output-dir "/shared/media/clipfinder-e2e"
+  ```
+  The output directory must be writable on the AI service host/container. Set `AI_SERVICE_URL` and optionally `AI_SERVICE_SECRET` in the environment; do not commit secrets. Use only media you have permission to process.
+
+- CI update for commit `30f8050ad7e1f4d05a5b5371553f100f908c7dd2`: Python suite **123 passed**; web Prisma generation, schema validation, typecheck, storage tests, lint, and build all passed. This includes the real-video smoke harness unit tests and atomic upload cleanup test. Newer follow-up tests for zero-duration candidate clamping and timeout coverage across every FFmpeg render stage, plus the CI concurrency update, remain unverified until latest-head Actions complete.
+
+
+## Storage hardening follow-up (2026-10-14)
+- Added atomic local-cache publication for object-store downloads: stream into a unique temporary sibling, rename only after full success, and remove temporary data on failure.
+- Added storage deletion for local files and S3 objects; local deletion is idempotent for already-missing files.
+- Reject Windows drive-qualified and UNC-style keys even when the service is running on POSIX, preventing cross-platform absolute-path confusion.
+- Added tests for local delete/idempotence, failed object download cleanup, interrupted object streams, and Windows path rejection.
+- These changes are committed to PR #18. CI is queued/pending on the latest head; do not mark the new storage cases passed until the current run completes.
+- No live S3 bucket or credentials were used. The interrupted-stream test stubs the AWS SDK client, and real S3 integration remains unverified.
+
+- Additional follow-up: thumbnail endpoint now rejects missing source media, handles output paths without a parent directory, and rejects missing/tiny thumbnail artifacts. Regression tests cover 404 behavior, empty output, and timeout handling. CI has not yet completed on this follow-up head.
+- Storage now includes a local byte-range test and a mocked S3 delete lifecycle test; these are contract/unit checks only, not evidence of live object-store access.

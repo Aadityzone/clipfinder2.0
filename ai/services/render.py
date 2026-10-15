@@ -6,6 +6,9 @@ import math
 from .captions import write_ass
 
 
+FFMPEG_TIMEOUT_SECONDS = 300
+
+
 def validate_segments(segments: list[dict], source_duration: float) -> tuple[list[dict], float]:
     if not segments or len(segments) > 100:
         raise ValueError("Provide between 1 and 100 render segments.")
@@ -35,8 +38,22 @@ def validate_segments(segments: list[dict], source_duration: float) -> tuple[lis
 
 def validate_render_output(metadata: dict, size: int, expected_duration: float) -> None:
     duration = metadata.get("duration")
-    if (size < 1024 or isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration)
-            or duration <= 0 or not metadata.get("width") or not metadata.get("height")):
+    width, height = metadata.get("width"), metadata.get("height")
+    dimensions_valid = all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+        and value > 0
+        for value in (width, height)
+    )
+    if (
+        size < 1024
+        or isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
+        or duration <= 0
+        or not dimensions_valid
+    ):
         raise ValueError("Render output is missing, empty, or not a readable video.")
     tolerance = max(0.75, expected_duration * 0.05)
     if abs(float(duration) - expected_duration) > tolerance:
@@ -88,6 +105,7 @@ def render(
                     "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
             )
             return
 
@@ -104,6 +122,7 @@ def render(
                         "-movflags", "+faststart", part_path,
                     ],
                     check=True,
+                    timeout=FFMPEG_TIMEOUT_SECONDS,
                 )
                 parts.append(part_path)
 
@@ -118,6 +137,7 @@ def render(
                     "-c", "copy", "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=FFMPEG_TIMEOUT_SECONDS,
             )
 
     if not captions:
@@ -139,4 +159,5 @@ def render(
                 "-c:a", "copy", "-movflags", "+faststart", output_path,
             ],
             check=True,
+            timeout=FFMPEG_TIMEOUT_SECONDS,
         )
