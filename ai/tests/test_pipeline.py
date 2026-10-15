@@ -19,3 +19,40 @@ def test_dedup_keeps_highest_scoring_overlap():
     result=deduplicate(items)
     assert len(result)==2
     assert result[0]["score"]==90
+
+
+def test_analyze_forwards_explicit_genre_to_ranking(monkeypatch):
+    from ai import main
+
+    observed = {}
+    candidate = {
+        "start": 1.0,
+        "end": 8.0,
+        "score": 50.0,
+        "text": "A surprising gaming clutch!",
+        "category": "ai_detect",
+        "rationale": "test evidence",
+        "features": {},
+    }
+
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "candidates", lambda *args, **kwargs: [dict(candidate)])
+    monkeypatch.setattr(main, "optimize_candidates", lambda _segments, rows: rows)
+    monkeypatch.setattr(main, "enrich_semantics", lambda rows, _instruction: rows)
+    monkeypatch.setattr(main, "deduplicate", lambda rows: rows)
+    monkeypatch.setattr(main, "score_candidates", lambda rows, _transcript, _instruction: rows)
+    monkeypatch.setattr(
+        main,
+        "apply_genre_profile",
+        lambda rows, _transcript, genre: observed.setdefault("genre", genre) or rows,
+    )
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda rows, _preferences: rows)
+
+    result = main.analyze(main.AnalyzeRequest(
+        segments=[{"start": 1.0, "end": 8.0, "text": "A surprising gaming clutch!"}],
+        genre="gaming",
+    ))
+
+    assert observed["genre"] == "gaming"
+    assert result["candidates"]
+
