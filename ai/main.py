@@ -17,6 +17,7 @@ from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
+from .services.genre_intelligence import apply_genre_profile, VALID_GENRES
 import hmac
 import os
 import uuid
@@ -47,6 +48,7 @@ class AnalyzeRequest(BaseModel):
     categories: list[str] = []
     media_path: str | None = None
     creator_preferences: dict[str, float] | None = None
+    genre: str = "auto"
 
 class AnalyzeResponse(BaseModel):
     candidates: list[dict]
@@ -148,7 +150,7 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}}
+    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES)}
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
@@ -173,6 +175,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
     result = score_candidates(result, transcript, b.instruction)
+    result = apply_genre_profile(result, transcript, b.genre)
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]
