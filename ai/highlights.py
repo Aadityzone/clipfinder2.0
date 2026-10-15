@@ -14,13 +14,25 @@ ALIASES = {"ai detect": "ai_detect", "fail/win": "fail / win"}
 def _words(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
 
+def _contains_cue(text: str, cue: str) -> bool:
+    """Match complete cue words/phrases, not accidental substrings."""
+    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\\s+", " ", cue.lower()).strip()
+    return bool(
+        phrase
+        and re.search(
+            r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])",
+            normalized,
+        )
+    )
+
 def score(text: str, start: float, end: float, instruction: str | None = None):
     words = _words(text)
     duration = max(.5, end - start)
     density = min(1, len(words) / max(duration * 2.2, 1))
     punct = min(1, (text.count("!") + text.count("?")) / 3)
     novelty = len(set(words)) / max(len(words), 1)
-    cue_hits = sum(1 for xs in CUES.values() for x in xs if x in text.lower())
+    cue_hits = sum(1 for xs in CUES.values() for x in xs if _contains_cue(text, x))
     cue = min(1, cue_hits / 4)
     custom = 0.0
     if instruction:
@@ -56,7 +68,7 @@ def candidates(segments, instruction=None, categories=None, media=None):
             continue
         low = text.lower()
         base = score(text, start, end, instruction)
-        matches = {k: sum(1 for x in xs if x in low) for k, xs in CUES.items()}
+        matches = {k: sum(1 for x in xs if _contains_cue(low, x)) for k, xs in CUES.items()}
         best = max(matches, key=matches.get) if matches else "ai_detect"
         cat = best if matches.get(best, 0) else "ai_detect"
         if "ai_detect" not in allowed and cat not in allowed:
