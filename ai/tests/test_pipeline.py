@@ -172,7 +172,7 @@ def test_highlight_cue_matching_normalizes_repeated_whitespace():
     from ai.highlights import _contains_cue
 
     assert _contains_cue("I cannot believe that happened", "cannot believe")
-    assert _contains_cue("I cannot\\tbelieve that happened", "cannot believe")
+    assert _contains_cue("I cannot" + "\t" + "believe that happened", "cannot believe")
 
 
 def test_dedup_discards_invalid_intervals_and_non_finite_scores():
