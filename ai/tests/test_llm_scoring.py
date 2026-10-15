@@ -101,3 +101,31 @@ def test_unsupported_multimodal_provider_falls_back_to_text(monkeypatch):
     )
     assert result[0]["features"]["llmScore"] == 90.0
 
+def test_local_ollama_scores_candidates_without_cloud_api_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+    observed = {}
+
+    def fake_urlopen(request, **_kwargs):
+        observed["url"] = request.full_url
+        observed["body"] = json.loads(request.data)
+        return _FakeResponse({
+            "message": {
+                "content": json.dumps([{"i": 0, "score": 92, "rationale": "Clear payoff"}])
+            }
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen)
+    candidates = [{
+        "start": 4, "end": 18, "score": 50, "text": "The final reveal changes everything.",
+        "features": {},
+    }]
+
+    result = llm.score_candidates(candidates, "The final reveal changes everything.")
+
+    assert observed["url"] == "http://127.0.0.1:11434/api/chat"
+    assert observed["body"]["model"] == "qwen2.5:3b"
+    assert result[0]["features"]["llmProvider"] == "ollama"
+    assert result[0]["features"]["llmScore"] == 92.0
+\n
