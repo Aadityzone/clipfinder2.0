@@ -63,3 +63,17 @@ def test_highlight_cues_do_not_match_inside_unrelated_words():
     assert not _contains_cue("a useful skill for beginners", "kill")
     assert _contains_cue("That was a huge win!", "win")
     assert _contains_cue("I can't believe it", "can't believe")
+
+def test_candidates_receive_grounded_title_fallbacks_without_an_llm():
+    from ai.main import _ensure_candidate_titles
+
+    result = _ensure_candidate_titles([
+        {"start": 0, "end": 10, "text": "The final reveal changes everything in the story.", "features": {}},
+        {"start": 65, "end": 80, "text": "", "category": "ai_detect", "features": {"eventKind": "visual_change"}},
+    ])
+
+    assert result[0]["title"] == "The final reveal changes everything…"
+    assert result[0]["features"]["titleSource"] == "transcript_extract"
+    assert result[1]["title"] == "Visual Change at 01:05"
+    assert result[1]["features"]["titleSource"] == "visual_timestamp"
+

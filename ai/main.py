@@ -154,6 +154,32 @@ def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES), "ranking": ranking_capabilities()}
 
+def _ensure_candidate_titles(candidates: list[dict]) -> list[dict]:
+    """Give every candidate a transparent title fallback when no LLM title exists."""
+    for candidate in candidates:
+        title = candidate.get("title")
+        if isinstance(title, str) and title.strip():
+            continue
+        features = candidate.setdefault("features", {})
+        words = str(candidate.get("text") or "").split()
+        if words:
+            title = " ".join(words[:8]).strip(" .,!?:;")
+            if len(words) > 8:
+                title += "…"
+            features["titleSource"] = "transcript_extract"
+        else:
+            try:
+                start = max(0, int(float(candidate.get("start", 0))))
+            except (TypeError, ValueError, OverflowError):
+                start = 0
+            timestamp = f"{start // 60:02d}:{start % 60:02d}"
+            event = str(features.get("eventKind") or candidate.get("category") or "visual highlight")
+            title = f"{event.replace('_', ' ').title()} at {timestamp}"
+            features["titleSource"] = "visual_timestamp"
+        candidate["title"] = title or "Untitled highlight"
+    return candidates
+
+
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
@@ -216,6 +242,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     # Genre profiles can now use speaker-turn and diarization features when available.
     result = apply_genre_profile(result, transcript, b.genre)
     result = apply_creator_preferences(result, b.creator_preferences)
+    result = _ensure_candidate_titles(result)
     # Revalidate after model/profile adjustments so the API never emits invalid scores.
     result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)

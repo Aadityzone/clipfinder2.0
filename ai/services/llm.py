@@ -79,7 +79,7 @@ def _ollama_request_body(
             "role": "system",
             "content": (
                 "Return JSON only: an array of objects with i, score (0-100), rationale, and a concise grounded title. "
-                "Rank genuine clip-worthiness using transcript and any attached single-frame evidence. Add a concise, accurate title grounded in the transcript. "
+                "Use the requested genre in the supplied JSON as ranking context. Rank genuine clip-worthiness using transcript and any attached single-frame evidence. Add a concise, accurate title grounded in the transcript; never invent events. "
                 "A still image cannot prove motion, dialogue, or an outcome. Do not invent events."
             ),
         },
@@ -204,8 +204,8 @@ def _request_body(model: str, prompt: dict, frame_urls: dict[int, str] | None = 
         "model": model,
         "input": [
             {"role": "system", "content":
-             "Return JSON only: an array of objects with i, score (0-100), rationale. "
-             "Judge transcript text and supplied frame/audio evidence. Images show only one sampled frame per candidate, not the whole event. "
+             "Return JSON only: an array of objects with i, score (0-100), rationale, and a concise grounded title. "
+             "Respect the requested genre in the supplied JSON. Judge transcript text and supplied frame/audio evidence. Images show only one sampled frame per candidate, not the whole event. "
              "Do not infer motion, dialogue, or outcomes that a still frame cannot establish. Do not invent events or candidates. "
              "Low-level motion, scene changes, or loud audio alone do not prove that a kill, fight, win, joke, or reveal occurred. "
              "When text is empty, rank only observable evidence and remain conservative."},
@@ -305,6 +305,8 @@ def score_candidates(
                 if item.get("title"):
                     candidate["title"] = item["title"]
                 features = candidate.setdefault("features", {})
+                if item.get("title"):
+                    features["titleSource"] = "llm"
                 features["llmScore"] = llm_score
                 features["llmProvider"] = provider
                 if i in frame_urls:
