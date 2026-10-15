@@ -70,6 +70,12 @@ def score_candidates(candidates: list[dict], transcript: str, instruction: str |
             "audioEnergy": c.get("features", {}).get("audioEnergy", 0),
             "sceneHits": c.get("features", {}).get("sceneHits", 0),
             "faceHits": c.get("features", {}).get("faceHits", 0),
+            "visualChange": c.get("features", {}).get("visualChange", 0),
+            "motion": c.get("features", {}).get("motion", 0),
+            "gameplayLikeRatio": c.get("features", {}).get("gameplayLikeRatio", 0),
+            "onScreenActionLabels": c.get("features", {}).get("onScreenActionLabels", []),
+            "eventKind": c.get("features", {}).get("eventKind"),
+            "eventStrength": c.get("features", {}).get("eventStrength", 0),
         },
     } for i, c in enumerate(candidates[:80])]
     prompt = {
@@ -82,7 +88,9 @@ def score_candidates(candidates: list[dict], transcript: str, instruction: str |
         "input": [
             {"role": "system", "content":
              "Return JSON only: an array of objects with i, score (0-100), rationale. "
-             "Judge the supplied text and context. Do not invent candidates."},
+             "Judge transcript text and the supplied audio/visual evidence. Do not invent events or candidates. "
+             "Low-level motion, scene changes, or loud audio alone do not prove that a kill, fight, win, joke, or reveal occurred. "
+             "When text is empty, rank only the observable evidence and remain conservative."},
             {"role": "user", "content": json.dumps(prompt)},
         ],
     }).encode()
