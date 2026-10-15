@@ -11,6 +11,7 @@ The implementation is intentionally real-only.
 - Durable worker jobs with retries, cancellation, stale-job recovery and delayed jobs
 - Whisper transcription with timestamps and word timestamps
 - Transcript candidate detection and category filtering
+- Initial genre-aware reranking profiles for gaming, IRL streams, movies/TV, anime, tech, knowledge/educational content, facts and podcasts (transparent transcript/media heuristics; not yet genre-specialized trained models)
 - Audio intelligence: volume, peak and silence intervals
 - Visual intelligence: scene-change detection and optional face detection
 - Deterministic ranking + optional LLM rescoring
@@ -43,6 +44,11 @@ These code paths are implemented but require real provider credentials before ac
 - YouTube/TikTok publishing
 
 The application must remain honest when these credentials are absent.
+
+## AI validation gaps
+- Run real one-hour samples from each target genre and label clip quality; current genre profiles are heuristics, not proof of good results
+- Add explicit source-time-range selection and chunked processing to the real worker path, then verify quota accounting and recovery
+- Benchmark end-to-end GPU/RAM/CPU usage on the target RTX 4050 laptop
 
 ## Next advanced expansion
 - Speaker diarization
