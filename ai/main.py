@@ -18,6 +18,7 @@ from .services.visual_intelligence import semantic_frame_scores, visual_capabili
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
 from .services.genre_intelligence import apply_genre_profile, VALID_GENRES
+from .services.candidate_contract import validate_candidates
 import hmac
 import os
 import uuid
@@ -155,12 +156,19 @@ def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
+    media_duration = None
+    if b.media_path:
+        if not os.path.isfile(b.media_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        media_duration = ffprobe(b.media_path).get("duration")
     media = analyze_media(b.media_path) if b.media_path else {}
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
     result = optimize_candidates(b.segments, result)
+    # Enforce one genre-neutral contract before any downstream feature extraction.
+    result = validate_candidates(result, media_duration)
     diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
     analysis_segments = diarized.get("segments") or b.segments
     speaker = speaker_signals(analysis_segments)
@@ -191,6 +199,8 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
     result = apply_creator_preferences(result, b.creator_preferences)
+    # Revalidate after model/profile adjustments so the API never emits invalid scores.
+    result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
 
