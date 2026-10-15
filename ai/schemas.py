@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field
 class TranscribeRequest(BaseModel):
     media_path: str
     language: str | None = None
+    start_seconds: float | None = None
+    end_seconds: float | None = None
 class Word(BaseModel):
     start: float
     end: float

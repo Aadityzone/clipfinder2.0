@@ -2,6 +2,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe
+from .services.transcription_range import transcribe_range
 from .services.download import download
 from .services.media import ffprobe
 from .services.render import render
@@ -145,7 +146,18 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
     if not os.path.isfile(b.media_path):
         raise HTTPException(status_code=404, detail="Media file not found")
     try:
-        return transcribe(b.media_path, b.language)
+        if b.start_seconds is None and b.end_seconds is None:
+            return transcribe(b.media_path, b.language)
+        if b.start_seconds is None or b.end_seconds is None:
+            raise HTTPException(status_code=400, detail="Both start_seconds and end_seconds are required for a source range.")
+        source_duration = float(ffprobe(b.media_path).get("duration") or 0)
+        return transcribe_range(
+            b.media_path, b.start_seconds, b.end_seconds, source_duration, b.language
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
