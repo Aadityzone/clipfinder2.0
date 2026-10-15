@@ -15,7 +15,7 @@ const statusStage: Record<string, number> = { QUEUED: -1, RETRYING: -1, DOWNLOAD
 
 export default function ProcessingJourney({ jobId, initialStatus, initialProgress }: { jobId: string; initialStatus: string; initialProgress: number }) {
   const [job, setJob] = useState<JobState>({ status: initialStatus, progress: initialProgress ?? 0 });
-  const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [lastUpdate, setLastUpdate] = useState(0);
   useEffect(() => {
     let stopped = false;
     const refresh = async () => {
