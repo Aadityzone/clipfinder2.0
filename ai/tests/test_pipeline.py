@@ -68,7 +68,7 @@ def test_candidates_receive_grounded_title_fallbacks_without_an_llm():
     from ai.main import _ensure_candidate_titles
 
     result = _ensure_candidate_titles([
-        {"start": 0, "end": 10, "text": "The final reveal changes everything in the story.", "features": {}},
+        {"start": 0, "end": 10, "text": "The final reveal changes everything in the story tonight.", "features": {}},
         {"start": 65, "end": 80, "text": "", "category": "ai_detect", "features": {"eventKind": "visual_change"}},
     ])
 
