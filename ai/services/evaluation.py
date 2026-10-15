@@ -73,6 +73,57 @@ def evaluate_ranked_candidates(
     }
 
 
+def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Combine benchmark reports using count-weighted metrics and macro averages."""
+    if not reports:
+        return {
+            "benchmarkCount": 0,
+            "predictionCount": 0,
+            "groundTruthCount": 0,
+            "matchedCount": 0,
+            "evaluatedTopK": 0,
+            "precisionAtK": 0.0,
+            "recallAtK": 0.0,
+            "f1AtK": 0.0,
+            "macroPrecisionAtK": 0.0,
+            "macroRecallAtK": 0.0,
+            "macroF1AtK": 0.0,
+            "meanMatchedIoU": 0.0,
+        }
+
+    prediction_count = sum(int(report.get("predictionCount", 0)) for report in reports)
+    ground_truth_count = sum(int(report.get("groundTruthCount", 0)) for report in reports)
+    matched_count = sum(int(report.get("matchedCount", 0)) for report in reports)
+    evaluated_count = sum(int(report.get("evaluatedTopK", 0)) for report in reports)
+    precision = matched_count / evaluated_count if evaluated_count else 0.0
+    recall = matched_count / ground_truth_count if ground_truth_count else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    matched_iou_weight = sum(
+        float(report.get("meanMatchedIoU", 0.0)) * int(report.get("matchedCount", 0))
+        for report in reports
+    )
+    macro_precision = sum(float(r.get("precisionAtK", 0.0)) for r in reports) / len(reports)
+    macro_recall = sum(float(r.get("recallAtK", 0.0)) for r in reports) / len(reports)
+    macro_f1 = sum(float(r.get("f1AtK", 0.0)) for r in reports) / len(reports)
+
+    return {
+        "benchmarkCount": len(reports),
+        "predictionCount": prediction_count,
+        "groundTruthCount": ground_truth_count,
+        "matchedCount": matched_count,
+        "evaluatedTopK": evaluated_count,
+        "precisionAtK": round(precision, 4),
+        "recallAtK": round(recall, 4),
+        "f1AtK": round(f1, 4),
+        "macroPrecisionAtK": round(macro_precision, 4),
+        "macroRecallAtK": round(macro_recall, 4),
+        "macroF1AtK": round(macro_f1, 4),
+        "meanMatchedIoU": round(matched_iou_weight / matched_count, 4)
+        if matched_count
+        else 0.0,
+    }
+
+
 def _valid_interval(item: dict[str, Any]) -> bool:
     try:
         start, end = float(item["start"]), float(item["end"])

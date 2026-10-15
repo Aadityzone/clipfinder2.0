@@ -1,4 +1,8 @@
-from ai.services.evaluation import evaluate_ranked_candidates, interval_iou
+from ai.services.evaluation import (
+    aggregate_evaluation_reports,
+    evaluate_ranked_candidates,
+    interval_iou,
+)
 
 
 def test_interval_iou_for_overlapping_and_disjoint_ranges():
@@ -29,3 +33,41 @@ def test_evaluation_handles_empty_and_invalid_inputs():
     assert result["groundTruthCount"] == 0
     assert result["precisionAtK"] == 0
     assert result["recallAtK"] == 0
+
+
+def test_aggregate_reports_are_count_weighted_and_include_macro_metrics():
+    reports = [
+        {
+            "predictionCount": 2,
+            "groundTruthCount": 1,
+            "matchedCount": 1,
+            "evaluatedTopK": 2,
+            "precisionAtK": 0.5,
+            "recallAtK": 1.0,
+            "f1AtK": round(2 / 3, 4),
+            "meanMatchedIoU": 0.8,
+        },
+        {
+            "predictionCount": 10,
+            "groundTruthCount": 4,
+            "matchedCount": 2,
+            "evaluatedTopK": 5,
+            "precisionAtK": 0.4,
+            "recallAtK": 0.5,
+            "f1AtK": round(4 / 9, 4),
+            "meanMatchedIoU": 0.6,
+        },
+    ]
+    result = aggregate_evaluation_reports(reports)
+    assert result["benchmarkCount"] == 2
+    assert result["matchedCount"] == 3
+    assert result["precisionAtK"] == round(3 / 7, 4)
+    assert result["recallAtK"] == 0.6
+    assert result["macroPrecisionAtK"] == 0.45
+    assert result["meanMatchedIoU"] == round((0.8 + 1.2) / 3, 4)
+
+
+def test_aggregate_empty_reports_is_safe():
+    result = aggregate_evaluation_reports([])
+    assert result["benchmarkCount"] == 0
+    assert result["f1AtK"] == 0
