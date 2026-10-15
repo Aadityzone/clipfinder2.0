@@ -99,15 +99,19 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
     await finishJob(j.id);
     return;
   }
-  const categoryLine=(project.customInstructions||"").split("\n").find((x:string)=>x.startsWith("Clip categories:"))||"";
+  const instructionLines=(project.customInstructions||"").split("\n");
+  const categoryLine=instructionLines.find((x:string)=>x.startsWith("Clip categories:"))||"";
+  const genreLine=instructionLines.find((x:string)=>x.startsWith("Content genre:"))||"";
+  const genre=genreLine.replace("Content genre:","").trim()||"auto";
   const categories=categoryLine.replace("Clip categories:","").split(",").map((x:string)=>x.trim()).filter(Boolean);
+  const instructions=instructionLines.filter((x:string)=>!x.startsWith("Clip categories:")&&!x.startsWith("Content genre:")).join("\n").trim()||undefined;
   await setJobProgress(j.id,.15,"ANALYZING");
   const mediaAsset=await db.mediaAsset.findUniqueOrThrow({where:{id:t.mediaAssetId}});
   const feedback=await loadCreatorFeedbackProfile(j.userId);
   await setJobProgress(j.id,.35,"ANALYZING");
   const result=await ai("/v1/analyze",{
     segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text})),
-    instruction:project.customInstructions,categories,
+    instruction:instructions,categories,genre,
     media_path:await ensureLocalStorage(mediaAsset.storageKey),
     creator_preferences:feedback.active?feedback.weights:{},
   });
