@@ -29,4 +29,3 @@ def test_story_cues_do_not_match_inside_unrelated_words():
 def test_story_conversation_signal_handles_capitalization_and_punctuation():
     signals = analyze_story("YOU, I think we should try again.", 20)
     assert signals.conversational > 0
-\n
