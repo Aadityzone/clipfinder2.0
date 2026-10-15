@@ -226,12 +226,25 @@ def score_candidates(
 
     openai_key = os.getenv("OPENAI_API_KEY")
     ollama_base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    if not openai_key and not ollama_base:
+    providers = []
+    if openai_key:
+        providers.append({
+            "name": "openai",
+            "base": os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+            "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            "can_see_frames": True,
+        })
+    if ollama_base:
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+        providers.append({
+            "name": "ollama",
+            "base": ollama_base,
+            "model": model,
+            "can_see_frames": _ollama_supports_vision(model),
+        })
+    if not providers:
         return candidates
 
-    provider = "openai" if openai_key else "ollama"
-    base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") if openai_key else ollama_base
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini") if openai_key else os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
     compact = [{
         "i": i,
         "start": c["start"],
@@ -261,43 +274,61 @@ def score_candidates(
             "Treat it as partial visual context, not proof of an event over time."
         ),
     }
-    # Sample frames only for providers/models that can accept image inputs.
-    can_see_frames = provider == "openai" or _ollama_supports_vision(model)
-    frame_urls = (
-        _candidate_frame_data_urls(media_path, candidates, limit=12)
-        if media_path and can_see_frames else {}
+    # Decode visual frames once and reuse them if the active provider supports vision.
+    needs_frames = media_path and any(p["can_see_frames"] for p in providers)
+    sampled_frames = (
+        _candidate_frame_data_urls(media_path, candidates, limit=12) if needs_frames else {}
     )
 
-    def make_request(with_frames: bool) -> Request:
-        frames = frame_urls if with_frames else {}
-        if provider == "ollama":
+    attempted: list[str] = []
+    last_error: Exception | None = None
+    for provider_config in providers:
+        provider = provider_config["name"]
+        base = provider_config["base"]
+        model = provider_config["model"]
+        attempted.append(provider)
+        frame_urls = sampled_frames if provider_config["can_see_frames"] else {}
+
+        def make_request(with_frames: bool) -> Request:
+            frames = frame_urls if with_frames else {}
+            if provider == "ollama":
+                return Request(
+                    base + "/api/chat",
+                    data=_ollama_request_body(model, prompt, frames),
+                    headers={"Content-Type": "application/json"},
+                )
             return Request(
-                base + "/api/chat",
-                data=_ollama_request_body(model, prompt, frames),
-                headers={"Content-Type": "application/json"},
+                base + "/responses",
+                data=_request_body(model, prompt, frames),
+                headers={"Authorization": "Bearer " + openai_key, "Content-Type": "application/json"},
             )
-        return Request(
-            base + "/responses",
-            data=_request_body(model, prompt, frames),
-            headers={"Authorization": "Bearer " + openai_key, "Content-Type": "application/json"},
-        )
 
-    try:
         try:
-            with urlopen(make_request(bool(frame_urls)), timeout=90 if provider == "ollama" else 60) as resp:
-                data = json.loads(resp.read())
-        except Exception:
-            # Providers without vision support can still rank transcript candidates.
-            if not frame_urls:
-                raise
-            with urlopen(make_request(False), timeout=90 if provider == "ollama" else 45) as resp:
-                data = json.loads(resp.read())
+            try:
+                with urlopen(
+                    make_request(bool(frame_urls)),
+                    timeout=90 if provider == "ollama" else 60,
+                ) as resp:
+                    data = json.loads(resp.read())
+            except Exception:
+                # Some providers/models reject images. Retry that provider without frames.
+                if not frame_urls:
+                    raise
+                with urlopen(
+                    make_request(False),
+                    timeout=90 if provider == "ollama" else 45,
+                ) as resp:
+                    data = json.loads(resp.read())
 
-        raw = _ollama_response_text(data) if provider == "ollama" else _response_text(data)
-        ranked = _parse_rankings(raw)
-        for i, candidate in enumerate(candidates[:80]):
-            item = ranked.get(i)
-            if item:
+            raw = _ollama_response_text(data) if provider == "ollama" else _response_text(data)
+            ranked = _parse_rankings(raw)
+            if not ranked:
+                raise ValueError("Model returned no valid candidate rankings")
+
+            for i, candidate in enumerate(candidates[:80]):
+                item = ranked.get(i)
+                if not item:
+                    continue
                 llm_score = item["score"]
                 candidate["score"] = round(float(candidate.get("score", 0)) * .55 + llm_score * .45, 2)
                 if item["rationale"]:
@@ -305,25 +336,29 @@ def score_candidates(
                 if item.get("title"):
                     candidate["title"] = item["title"]
                 features = candidate.setdefault("features", {})
-                if item.get("title"):
-                    features["titleSource"] = "llm"
                 features["llmScore"] = llm_score
                 features["llmProvider"] = provider
                 if i in frame_urls:
                     features["llmVisualEvidence"] = True
+                if item.get("title"):
+                    features["titleSource"] = "llm"
                 features["llmRanking"] = {
                     "provider": provider,
                     "status": "completed",
                     "visualEvidence": i in frame_urls,
                 }
-    except Exception as exc:
-        # Keep deterministic ranking available, but retain safe diagnostics so
-        # provider outages and malformed model output are not silently invisible.
-        for candidate in candidates[:80]:
-            features = candidate.setdefault("features", {})
-            features["llmRanking"] = {
-                "provider": provider,
-                "status": "unavailable",
-                "errorType": type(exc).__name__,
-            }
+            return candidates
+        except Exception as exc:
+            last_error = exc
+            # If the preferred cloud provider is unavailable, try the configured
+            # local model before giving up and leaving the deterministic scores intact.
+            continue
+
+    for candidate in candidates[:80]:
+        features = candidate.setdefault("features", {})
+        features["llmRanking"] = {
+            "provider": "+".join(attempted),
+            "status": "unavailable",
+            "errorType": type(last_error).__name__ if last_error else "UnknownError",
+        }
     return candidates

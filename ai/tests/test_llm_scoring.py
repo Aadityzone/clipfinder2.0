@@ -203,3 +203,35 @@ def test_selected_genre_is_sent_to_the_model_prompt(monkeypatch):
     prompt = json.loads(observed["body"]["input"][1]["content"][0]["text"])
     assert prompt["genre"] == "anime"
 
+def test_openai_failure_falls_back_to_configured_ollama(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+    requests = []
+
+    def fake_urlopen(request, **_kwargs):
+        requests.append(request.full_url)
+        if len(requests) == 1:
+            raise TimeoutError("cloud provider unavailable")
+        return _FakeResponse({
+            "message": {
+                "content": json.dumps([{
+                    "i": 0, "score": 90, "rationale": "Local model found a strong payoff",
+                    "title": "The Final Payoff",
+                }])
+            }
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen)
+    candidates = [{"start": 3, "end": 12, "score": 50, "text": "The ending pays off.", "features": {}}]
+
+    result = llm.score_candidates(candidates, "The ending pays off.")
+
+    assert requests == [
+        "https://api.openai.com/v1/responses",
+        "http://127.0.0.1:11434/api/chat",
+    ]
+    assert result[0]["features"]["llmProvider"] == "ollama"
+    assert result[0]["features"]["llmRanking"]["status"] == "completed"
+    assert result[0]["title"] == "The Final Payoff"
+
