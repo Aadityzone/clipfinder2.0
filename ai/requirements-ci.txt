@@ -1,0 +1,10 @@
+fastapi>=0.116,<1
+uvicorn[standard]>=0.35,<1
+faster-whisper>=1.2,<2
+yt-dlp>=2026.8,<2027
+ffmpeg-python>=0.2,<1
+python-multipart>=0.0.20,<1
+pydantic>=2.11,<3
+opencv-python-headless>=4.10,<5
+numpy>=2,<3
+pytest>=8.3,<9
