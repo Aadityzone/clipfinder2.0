@@ -60,3 +60,30 @@ def test_auto_genre_detection_abstains_when_top_profiles_tie():
     leaders = [name for name, score in scores.items() if score == top]
     if len(leaders) > 1:
         assert genre == "general"
+
+
+
+def test_genre_profiles_use_available_modality_features():
+    podcast = [{
+        "text": "I disagree with your point, and here is why.",
+        "score": 50,
+        "features": {"speakers": {"turnCount": 4}, "faceHits": 2},
+    }]
+    apply_genre_profile(podcast, "This is an interview and conversation.", "podcast")
+    assert podcast[0]["score"] > 50
+
+    educational = [{
+        "text": "The process is explained step by step.",
+        "score": 50,
+        "features": {"story": {"completeness": 0.9, "payoff": 0.8}},
+    }]
+    apply_genre_profile(educational, "Here is how the process works because of this principle.", "knowledge")
+    assert educational[0]["score"] > 50
+
+    gaming = [{
+        "text": "The round ends with victory.",
+        "score": 50,
+        "features": {"onScreenActionLabels": ["victory"], "gameplayLikeRatio": 0.8},
+    }]
+    apply_genre_profile(gaming, "The final round ended in victory.", "gaming")
+    assert gaming[0]["score"] > 50
