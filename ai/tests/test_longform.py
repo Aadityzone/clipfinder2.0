@@ -66,3 +66,16 @@ def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
     assert observed["instruction"] == "Prioritize a clear payoff"
     assert observed["media_path"] == "/tmp/source.mp4"
     assert "clutch" in observed["transcript"]
+
+def test_story_windows_overlap_to_preserve_context_at_chunk_edges():
+    segments = [
+        {"start": index * 5, "end": (index + 1) * 5, "text": f"Segment {index} has useful context."}
+        for index in range(12)
+    ]
+
+    result = stories(segments, limit=10)
+    ranges = {(item["start"], item["end"]) for item in result}
+
+    assert (0.0, 50.0) in ranges
+    assert (25.0, 60.0) in ranges
+

@@ -40,30 +40,42 @@ def _story_candidate(window: list[dict[str, Any]], start: float, rationale: str)
 
 
 def stories(segments: list[dict], limit: int = 6) -> list[dict]:
-    """Create transcript-grounded story windows with inspectable ranking evidence."""
-    if not segments:
-        return []
-    out: list[dict] = []
-    window: list[dict] = []
-    start = 0.0
+    """Create overlapping story windows so payoffs near chunk edges keep context."""
+    valid = []
     for segment in segments:
         text = str(segment.get("text", "")).strip()
-        if not text:
+        try:
+            start, end = float(segment["start"]), float(segment["end"])
+        except (KeyError, TypeError, ValueError, OverflowError):
             continue
+        if text and start >= 0 and end > start:
+            valid.append({**segment, "text": text, "start": start, "end": end})
+    if not valid:
+        return []
+
+    out: list[dict] = []
+    start_index = 0
+    while start_index < len(valid):
+        window: list[dict] = []
+        start = float(valid[start_index]["start"])
+        index = start_index
+        while index < len(valid) and len(window) < 10:
+            segment = valid[index]
+            if window and float(segment["end"]) - start > 300:
+                break
+            window.append(segment)
+            index += 1
         if not window:
-            start = float(segment["start"])
-        window.append(segment)
-        if len(window) >= 10 or float(segment["end"]) - start >= 300:
-            out.append(_story_candidate(
-                window, start,
-                "Long-form story candidate ranked by hook, tension, payoff, completeness, and lexical variety.",
-            ))
-            window = []
-    if window:
+            break
         out.append(_story_candidate(
             window, start,
-            "Final long-form story candidate ranked from the remaining transcript context.",
+            "Overlapping long-form story candidate ranked by hook, tension, payoff, completeness, and lexical variety.",
         ))
+        if index >= len(valid):
+            break
+        # Half-window stride preserves setup/payoff context across boundaries.
+        start_index += max(1, len(window) // 2)
+
     return sorted(out, key=lambda item: float(item.get("score", 0)), reverse=True)[:max(1, int(limit))]
 
 
