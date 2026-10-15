@@ -224,7 +224,8 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
 @app.post("/v1/longform", response_model=LongFormResponse)
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    items = stories(b.segments)
+    # Let the model compare a wider candidate pool before selecting the final six.
+    items = stories(b.segments, limit=40)
     transcript = " ".join(str(segment.get("text", "")) for segment in b.segments)
     items = score_candidates(items, transcript, b.instruction, media_path=b.media_path)
     items = apply_genre_profile(items, transcript, b.genre)
