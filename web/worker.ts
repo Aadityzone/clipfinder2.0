@@ -45,9 +45,19 @@ async function tick(){await queueDuePosts();const j=await claimNextJob();if(!j)r
     }});
   }
   await assertJobNotCancelled(j.id);
+  const sourceRange=p.sourceRange;
+  if(sourceRange){
+    const start=Number(sourceRange.startSeconds), end=Number(sourceRange.endSeconds);
+    if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end-start>3600){
+      throw new Error("Invalid source range. Each requested range must be no longer than one hour.");
+    }
+    if(!Number.isFinite(Number(asset.durationS))||end>Number(asset.durationS)+0.05){
+      throw new Error("Requested source range extends beyond the source video duration.");
+    }
+  }
   await completeJobAndEnqueue(j.id,{
     userId:j.userId,projectId:j.projectId,type:"TRANSCRIBE",
-    payload:{mediaAssetId:asset.id},
+    payload:{mediaAssetId:asset.id,sourceRange:sourceRange||null},
   });
   return;
 }
@@ -61,12 +71,12 @@ if(j.type==="TRANSCRIBE"){
   if(!transcript){
     const localMedia=await ensureLocalStorage(asset.storageKey);
     await setJobProgress(j.id,.2,"TRANSCRIBING");
-    const result=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined});
+    const result=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined,...(p.sourceRange?{start_seconds:Number(p.sourceRange.startSeconds),end_seconds:Number(p.sourceRange.endSeconds)}:{})});
     await setJobProgress(j.id,.85,"TRANSCRIBING");
     await assertJobNotCancelled(j.id);
     transcript=await db.transcript.create({data:{
       mediaAssetId:p.mediaAssetId,language:result.language,text:result.text,
-      metadata:{duration:result.duration},
+      metadata:{duration:result.duration,sourceStartS:result.sourceStartS??0,sourceEndS:result.sourceEndS??result.duration},
       segments:{create:result.segments.map((s:any)=>({
         startS:s.start,endS:s.end,text:s.text,confidence:s.confidence,
         words:{create:(s.words||[]).map((w:any)=>({

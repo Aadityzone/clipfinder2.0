@@ -79,6 +79,23 @@ export async function POST(req: NextRequest) {
       categories.length ? "Clip categories: " + categories.join(", ") : "",
       instructions,
     ].filter(Boolean).join("\n\n") || null;
+    let sourceRange: { startSeconds: number; endSeconds: number } | null = null;
+    const hasRangeStart = body.sourceStartSeconds !== undefined && body.sourceStartSeconds !== null && body.sourceStartSeconds !== "";
+    const hasRangeEnd = body.sourceEndSeconds !== undefined && body.sourceEndSeconds !== null && body.sourceEndSeconds !== "";
+    if (hasRangeStart !== hasRangeEnd) {
+      return Response.json({ error: "Provide both sourceStartSeconds and sourceEndSeconds, or neither." }, { status: 400 });
+    }
+    if (hasRangeStart && hasRangeEnd) {
+      const startSeconds = Number(body.sourceStartSeconds);
+      const endSeconds = Number(body.sourceEndSeconds);
+      if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
+        return Response.json({ error: "Source range timestamps must be finite and end must be after start." }, { status: 400 });
+      }
+      if (endSeconds - startSeconds > 3600) {
+        return Response.json({ error: "Each source range is limited to one hour." }, { status: 400 });
+      }
+      sourceRange = { startSeconds, endSeconds };
+    }
     const mode = body.mode === "LONG_FORM" ? "LONG_FORM" : "SHORTS";
     const language = String(body.outputLanguage ?? "en").slice(0, 12);
 
@@ -107,7 +124,7 @@ export async function POST(req: NextRequest) {
             payload: {
               sourceUrl: parsedSource.url,
               categories,
-              timeframe: body.timeframe ?? "full",
+              sourceRange,
               rightsConfirmed: true,
             },
           },
