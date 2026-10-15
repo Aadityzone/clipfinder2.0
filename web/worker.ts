@@ -144,6 +144,7 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
     segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text})),
     instruction:instructions,categories,genre,
     media_path:await ensureLocalStorage(mediaAsset.storageKey),
+    ...(sourceRange?{start_seconds:Number(sourceRange.startSeconds),end_seconds:Number(sourceRange.endSeconds)}:{}),
     creator_preferences:feedback.active?feedback.weights:{},
   });
   await setJobProgress(j.id,.85,"ANALYZING");

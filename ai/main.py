@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe
 from .services.transcription_range import transcribe_range
+from .services.analysis_range import extract_analysis_range, shift_segments_to_range, validate_analysis_range
 from .services.download import download
 from .services.media import ffprobe
 from .services.render import render
@@ -26,6 +27,7 @@ import os
 import uuid
 import importlib.util
 import shutil
+import tempfile
 
 app = FastAPI(title="Clip Finder AI", version="2.2.0")
 
@@ -52,6 +54,8 @@ class AnalyzeRequest(BaseModel):
     media_path: str | None = None
     creator_preferences: dict[str, float] | None = None
     genre: str = "auto"
+    start_seconds: float | None = None
+    end_seconds: float | None = None
 
 class AnalyzeResponse(BaseModel):
     candidates: list[dict]
@@ -195,6 +199,39 @@ def _ensure_candidate_titles(candidates: list[dict]) -> list[dict]:
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
+    if b.start_seconds is not None or b.end_seconds is not None:
+        if b.start_seconds is None or b.end_seconds is None:
+            raise HTTPException(status_code=400, detail="Both start_seconds and end_seconds are required for bounded analysis.")
+        if not b.media_path or not os.path.isfile(b.media_path):
+            raise HTTPException(status_code=404, detail="A valid media_path is required for bounded analysis.")
+        source_duration = float(ffprobe(b.media_path).get("duration") or 0)
+        try:
+            range_start, range_end = validate_analysis_range(
+                b.start_seconds, b.end_seconds, source_duration
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with tempfile.TemporaryDirectory(prefix="clipfinder-analysis-range-") as temporary:
+            try:
+                ranged_path = extract_analysis_range(
+                    b.media_path, range_start, range_end, os.path.join(temporary, "analysis-range.mp4")
+                )
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                raise HTTPException(status_code=500, detail=f"Could not prepare bounded analysis media: {exc}") from exc
+            local_segments = shift_segments_to_range(b.segments, range_start, range_end)
+            local_request = b.model_copy(update={
+                "segments": local_segments,
+                "media_path": ranged_path,
+                "start_seconds": None,
+                "end_seconds": None,
+            })
+            local_result = analyze(local_request, x_ai_secret)
+            for candidate in local_result.get("candidates", []):
+                candidate["start"] = round(float(candidate["start"]) + range_start, 3)
+                candidate["end"] = round(float(candidate["end"]) + range_start, 3)
+            absolute_candidates = validate_candidates(local_result.get("candidates", []), source_duration)
+            absolute_candidates = sorted(absolute_candidates, key=lambda item: float(item.get("score", 0)), reverse=True)
+            return {"candidates": absolute_candidates[:50]}
     media_duration = None
     if b.media_path:
         if not os.path.isfile(b.media_path):
