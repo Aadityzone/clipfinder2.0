@@ -181,7 +181,11 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         result = optimize_candidates(b.segments, result)
     # Enforce one genre-neutral contract before any downstream feature extraction.
     result = validate_candidates(result, media_duration)
-    diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
+    diarized = (
+        diarize(b.media_path, b.segments)
+        if b.media_path and b.segments
+        else {"available": False, "segments": [], "reason": "media or transcript segments unavailable"}
+    )
     analysis_segments = diarized.get("segments") or b.segments
     speaker = speaker_signals(analysis_segments)
     for candidate in result:
