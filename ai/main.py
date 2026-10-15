@@ -9,7 +9,7 @@ from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
 from .services.dedup import deduplicate
-from .services.llm import score_candidates
+from .services.llm import score_candidates, ranking_capabilities
 from .services.semantic import enrich_semantics
 from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
@@ -152,7 +152,7 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES)}
+    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES), "ranking": ranking_capabilities()}
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
