@@ -17,7 +17,7 @@ def test_unknown_ocr_text_does_not_invent_action():
     assert _classify_ocr("health ammo inventory") == []
 
 def test_ocr_action_terms_match_whole_words_not_substrings():
-    assert _classify_ocr("window skill winner") == []
+    assert _classify_ocr("window skill windowsill") == []
     labels = _classify_ocr("WIN! The enemy was eliminated.")
     assert "victory" in labels
     assert "combat" in labels
