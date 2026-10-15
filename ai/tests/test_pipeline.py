@@ -72,7 +72,7 @@ def test_candidates_receive_grounded_title_fallbacks_without_an_llm():
         {"start": 65, "end": 80, "text": "", "category": "ai_detect", "features": {"eventKind": "visual_change"}},
     ])
 
-    assert result[0]["title"] == "The final reveal changes everything…"
+    assert result[0]["title"] == "The final reveal changes everything in the story…"
     assert result[0]["features"]["titleSource"] == "transcript_extract"
     assert result[1]["title"] == "Visual Change at 01:05"
     assert result[1]["features"]["titleSource"] == "visual_timestamp"
