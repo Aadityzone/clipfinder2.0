@@ -1,0 +1,115 @@
+"""Propose evidence-backed candidates from multimodal events, including sparse-speech moments.
+
+These are event-window proposals, not semantic claims that a fight, joke, or win
+occurred. Genre-specific models can later classify the event using the attached
+evidence and sampled frames.
+"""
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any
+
+
+def _number(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return number if number == number and abs(number) != float("inf") else default
+
+
+def _window_text(segments: list[dict], start: float, end: float) -> str:
+    return " ".join(
+        str(segment.get("text", "")).strip()
+        for segment in segments
+        if _number(segment.get("end")) > start and _number(segment.get("start")) < end
+    ).strip()
+
+
+def multimodal_event_candidates(
+    segments: list[dict],
+    media: dict[str, Any],
+    duration: float | None = None,
+    min_event_strength: float = 0.58,
+    max_candidates: int = 40,
+) -> list[dict]:
+    """Build bounded candidate windows from timestamped audio/visual event evidence."""
+    duration_value = _number(duration, 0.0)
+    visual_samples = media.get("visual", {}).get("samples", []) or []
+    audio_windows = media.get("audioWindows", []) or []
+    scenes = media.get("scenes", {}).get("sceneChanges", []) or []
+    screen_samples = media.get("onScreen", {}).get("samples", []) or []
+    if not any((visual_samples, audio_windows, scenes, screen_samples)):
+        return []
+
+    events: list[dict] = []
+    for row in visual_samples:
+        time = _number(row.get("time"), -1)
+        if time < 0:
+            continue
+        change = max(0.0, min(1.0, _number(row.get("visualChange"))))
+        motion = max(0.0, min(1.0, _number(row.get("motion"))))
+        strength = max(change, motion)
+        if strength >= min_event_strength:
+            events.append({"time": time, "strength": strength, "kind": "visual_change",
+                           "evidence": {"visualChange": change, "motion": motion}})
+
+    for row in audio_windows:
+        time = _number(row.get("start"), -1)
+        if time < 0:
+            continue
+        energy = max(0.0, min(1.0, _number(row.get("energy"))))
+        peak_db = _number(row.get("peakDb"), -120.0)
+        # Energy is normalized by the audio analyzer; a peak adds confidence.
+        peak_strength = max(0.0, min(1.0, (peak_db + 24.0) / 24.0))
+        strength = max(energy, peak_strength)
+        if strength >= min_event_strength:
+            events.append({"time": time, "strength": strength, "kind": "audio_peak",
+                           "evidence": {"audioEnergy": energy, "audioPeakDb": peak_db}})
+
+    for time_value in scenes:
+        time = _number(time_value, -1)
+        if time >= 0:
+            events.append({"time": time, "strength": 0.62, "kind": "scene_change",
+                           "evidence": {"sceneChange": True}})
+
+    for row in screen_samples:
+        time = _number(row.get("time"), -1)
+        labels = list(row.get("actionLabels") or [])
+        if time >= 0 and labels:
+            events.append({"time": time, "strength": 0.72, "kind": "on_screen_action",
+                           "evidence": {"onScreenActionLabels": sorted(set(map(str, labels))),
+                                        "onScreenText": str(row.get("ocrText") or "")[:500]}})
+
+    events.sort(key=lambda event: (-event["strength"], event["time"]))
+    selected: list[dict] = []
+    for event in events:
+        if any(abs(event["time"] - kept["time"]) < 8.0 for kept in selected):
+            continue
+        selected.append(event)
+        if len(selected) >= max_candidates:
+            break
+
+    proposals = []
+    for event in selected:
+        center = event["time"]
+        start = max(0.0, center - 12.0)
+        end = center + 18.0
+        if duration_value > 0:
+            end = min(duration_value, end)
+        if end <= start:
+            continue
+        text = _window_text(segments, start, end)
+        evidence = dict(event["evidence"])
+        evidence["eventKind"] = event["kind"]
+        evidence["eventStrength"] = round(event["strength"], 3)
+        proposals.append({
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "text": text,
+            "score": round(35.0 + event["strength"] * 30.0, 2),
+            "category": "ai_detect",
+            "rationale": "Candidate proposed from timestamped multimodal event evidence; semantic event identity is not yet verified.",
+            "features": {"multimodalProposal": True, **evidence},
+        })
+    return proposals
