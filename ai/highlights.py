@@ -16,8 +16,8 @@ def _words(text: str) -> list[str]:
 
 def _contains_cue(text: str, cue: str) -> bool:
     """Match complete cue words/phrases, not accidental substrings."""
-    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
-    phrase = re.sub(r"\\s+", " ", cue.lower()).strip()
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\s+", " ", cue.lower()).strip()
     return bool(
         phrase
         and re.search(
