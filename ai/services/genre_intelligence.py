@@ -119,10 +119,26 @@ def apply_genre_profile(
         if active == "gaming":
             bonus += min(2.0, len(action_labels) * 0.5)
             bonus += min(1.0, gameplay_ratio)
-        elif active in {"irl_stream", "podcast"}:
+            if any(label in {"combat", "victory", "failure"} for label in action_labels):
+                bonus += 1.5
+        elif active == "irl_stream":
             bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
+            bonus += min(1.0, float(features.get("audioEnergy") or 0))
+        elif active == "podcast":
+            bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
+            speakers = features.get("speakers") or {}
+            bonus += min(2.0, float(speakers.get("turnCount") or 0) * 0.4)
         elif active in {"movies_tv", "anime"}:
-            bonus += min(1.5, visual_change * 1.5 + motion)
+            bonus += min(2.0, visual_change * 1.5 + motion)
+            bonus += min(1.0, float(features.get("sceneHits") or 0) * 0.2)
+        elif active == "tech":
+            bonus += min(1.5, float(features.get("sceneHits") or 0) * 0.25)
+            bonus += min(1.0, len(str(features.get("onScreenText") or "")) / 300)
+        elif active in {"knowledge", "facts"}:
+            story = features.get("story") or {}
+            bonus += min(2.0, float(story.get("completeness") or 0) * 2)
+            bonus += min(1.0, float(story.get("payoff") or 0))
+        bonus = min(12.0, bonus)
         candidate["score"] = round(min(100.0, float(candidate.get("score", 0)) + bonus), 2)
         features["genreProfile"] = {
             "requested": requested,
