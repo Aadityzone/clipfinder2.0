@@ -33,7 +33,7 @@ def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
     observed = {}
 
     monkeypatch.setattr(main, "auth", lambda _secret: None)
-    monkeypatch.setattr(main, "stories", lambda _segments: [{
+    monkeypatch.setattr(main, "stories", lambda _segments, limit=6: [{
         "start": 0, "end": 10, "score": 40, "title": "A story",
         "text": "A clutch changes the whole game.", "features": {},
     }])
