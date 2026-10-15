@@ -128,7 +128,7 @@ def test_local_ollama_scores_candidates_without_cloud_api_key(monkeypatch):
     assert observed["body"]["model"] == "qwen2.5:3b"
     assert result[0]["features"]["llmProvider"] == "ollama"
     assert result[0]["features"]["llmScore"] == 92.0
-\n
+
 
 def test_ranking_capabilities_reports_local_provider_without_secrets(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -154,4 +154,3 @@ def test_ranking_capabilities_explicitly_reports_heuristic_fallback(monkeypatch)
 
     assert result["provider"] == "heuristic"
     assert result["configured"] is False
-\n
