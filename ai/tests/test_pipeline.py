@@ -77,3 +77,57 @@ def test_candidates_receive_grounded_title_fallbacks_without_an_llm():
     assert result[1]["title"] == "Visual Change at 01:05"
     assert result[1]["features"]["titleSource"] == "visual_timestamp"
 
+def test_longform_rejects_missing_media_path(monkeypatch, tmp_path):
+    import pytest
+    from fastapi import HTTPException
+    from ai import main
+
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    request = main.AnalyzeRequest(
+        segments=[{"start": 0, "end": 5, "text": "A complete story."}],
+        media_path=str(tmp_path / "missing.mp4"),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        main.longform(request)
+
+    assert error.value.status_code == 404
+
+
+def test_longform_clips_ranked_stories_to_media_duration(monkeypatch, tmp_path):
+    from ai import main
+
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"test")
+    candidate = {
+        "start": 80,
+        "end": 120,
+        "score": 140,
+        "text": "The story reaches its final payoff.",
+        "title": "The Final Payoff",
+        "rationale": "A grounded ending.",
+        "features": {"story": {"payoff": 0.9}},
+    }
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "ffprobe", lambda _path: {"duration": 100})
+    monkeypatch.setattr(main, "stories", lambda _segments, limit: [dict(candidate)])
+    monkeypatch.setattr(
+        main, "score_candidates",
+        lambda rows, _transcript, _instruction, **_kwargs: rows,
+    )
+    monkeypatch.setattr(main, "apply_genre_profile", lambda rows, _transcript, _genre: rows)
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda rows, _preferences: rows)
+    monkeypatch.setattr(main, "deduplicate", lambda rows, threshold: rows)
+
+    result = main.longform(main.AnalyzeRequest(
+        segments=[{"start": 0, "end": 100, "text": "The story reaches its final payoff."}],
+        media_path=str(media),
+        genre="podcast",
+        creator_preferences={},
+    ))
+
+    assert len(result["stories"]) == 1
+    assert result["stories"][0]["start"] == 80
+    assert result["stories"][0]["end"] == 100
+    assert result["stories"][0]["score"] == 100
+    assert result["chapters"][0]["start"] == 80.0

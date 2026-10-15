@@ -251,13 +251,27 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
 @app.post("/v1/longform", response_model=LongFormResponse)
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
+    media_duration = None
+    if b.media_path:
+        if not os.path.isfile(b.media_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        media_duration = ffprobe(b.media_path).get("duration")
+
     # Let the model compare a wider candidate pool before selecting the final six.
-    items = stories(b.segments, limit=40)
+    # Apply the same genre-neutral contract used by short-form analysis so invalid
+    # timestamps and non-finite/out-of-range scores cannot leak into chapters.
+    items = validate_candidates(stories(b.segments, limit=40), media_duration)
     transcript = " ".join(str(segment.get("text", "")) for segment in b.segments)
-    items = score_candidates(items, transcript, b.instruction, media_path=b.media_path, genre=b.genre)
+    items = score_candidates(
+        items, transcript, b.instruction, media_path=b.media_path, genre=b.genre
+    )
     items = apply_genre_profile(items, transcript, b.genre)
+    items = apply_creator_preferences(items, b.creator_preferences)
+    items = validate_candidates(items, media_duration)
     items = deduplicate(items, threshold=0.55)
+    items = validate_candidates(items, media_duration)
     items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)[:6]
+    items = _ensure_candidate_titles(items)
     meta = package(b.segments, items)
     return {"stories": items, **meta}
 
