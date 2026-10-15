@@ -61,3 +61,43 @@ class _FakeResponse:
 
     def read(self):
         return json.dumps(self.payload).encode()
+
+def test_request_body_includes_labeled_visual_evidence():
+    body = json.loads(llm._request_body(
+        "vision-model",
+        {"candidates": [{"i": 0, "text": "A surprise"}]},
+        {0: "data:image/jpeg;base64,ZmFrZQ=="},
+    ))
+    content = body["input"][1]["content"]
+    assert any(item.get("type") == "input_image" for item in content)
+    assert any("candidate index 0" in item.get("text", "") for item in content)
+
+
+def test_unsupported_multimodal_provider_falls_back_to_text(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "_candidate_frame_data_url", lambda *_args: "data:image/jpeg;base64,ZmFrZQ==")
+    requests = []
+
+    def fake_urlopen(request, **_kwargs):
+        payload = json.loads(request.data)
+        requests.append(payload)
+        if len(requests) == 1:
+            raise ValueError("provider does not support image input")
+        return _FakeResponse({
+            "output_text": json.dumps([{"i": 0, "score": 90, "rationale": "Strong moment"}])
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen)
+    candidates = [{
+        "start": 1, "end": 8, "score": 60, "text": "A strong moment", "features": {}
+    }]
+
+    result = llm.score_candidates(candidates, "A strong moment", media_path="source.mp4")
+
+    assert len(requests) == 2
+    assert any(item.get("type") == "input_image" for item in requests[0]["input"][1]["content"])
+    assert not isinstance(requests[1]["input"][1]["content"], list) or not any(
+        item.get("type") == "input_image" for item in requests[1]["input"][1]["content"]
+    )
+    assert result[0]["features"]["llmScore"] == 90.0
+
