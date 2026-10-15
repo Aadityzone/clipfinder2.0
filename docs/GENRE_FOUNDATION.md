@@ -41,7 +41,7 @@ fights, transformations, or other semantic events.
 
 Do not mark a genre as reliable based only on passing unit tests or keyword
 matches. For each genre, collect representative, rights-authorized test videos
-and human-labeled candidate ranges. Measure at least:
+and human-labeled candidate ranges. Use `ai.services.evaluation.evaluate_ranked_candidates` against timestamped human labels to report precision@K, recall@K, F1@K, match count, and mean matched IoU. Measure at least:
 
 - timestamp validity and source-boundary correctness;
 - precision among top-ranked clips;
