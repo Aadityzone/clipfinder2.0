@@ -18,3 +18,15 @@ def test_boundaries_include_context():
     start, end = find_boundaries(segments, 2, min_duration=12, max_duration=75)
     assert start <= 4
     assert end >= 18
+
+def test_story_cues_do_not_match_inside_unrelated_words():
+    signals = analyze_story("The sofa is beside the sofa, and the software is stable.", 20)
+    assert signals.hook == 0
+    assert signals.tension == 0
+    assert signals.payoff < 0.5
+
+
+def test_story_conversation_signal_handles_capitalization_and_punctuation():
+    signals = analyze_story("YOU, I think we should try again.", 20)
+    assert signals.conversational > 0
+\n
