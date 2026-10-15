@@ -141,7 +141,7 @@ def test_ranking_capabilities_reports_local_provider_without_secrets(monkeypatch
         "provider": "ollama",
         "configured": True,
         "model": "qwen2.5:3b",
-        "visualRanking": True,
+        "visualRanking": False,
     }
     assert "apiKey" not in result
 
