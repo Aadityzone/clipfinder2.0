@@ -38,10 +38,11 @@ def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
         "text": "A clutch changes the whole game.", "features": {},
     }])
 
-    def rank(items, transcript, instruction, media_path=None):
+    def rank(items, transcript, instruction, media_path=None, genre="auto"):
         observed["transcript"] = transcript
         observed["instruction"] = instruction
         observed["media_path"] = media_path
+        observed["rank_genre"] = genre
         return items
 
     def genre(items, transcript, requested):
@@ -65,6 +66,7 @@ def test_longform_route_applies_llm_and_genre_ranking(monkeypatch):
     assert observed["genre"] == "gaming"
     assert observed["instruction"] == "Prioritize a clear payoff"
     assert observed["media_path"] == "/tmp/source.mp4"
+    assert observed["rank_genre"] == "gaming"
     assert "clutch" in observed["transcript"]
 
 def test_story_windows_overlap_to_preserve_context_at_chunk_edges():

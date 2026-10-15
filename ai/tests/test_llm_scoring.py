@@ -185,3 +185,21 @@ def test_model_title_is_parsed_and_attached_to_candidate(monkeypatch):
     assert result[0]["title"] == "The Unexpected Final Turn"
     assert result[0]["features"]["llmScore"] == 88.0
 
+def test_selected_genre_is_sent_to_the_model_prompt(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    observed = {}
+
+    def fake_urlopen(request, **_kwargs):
+        observed["body"] = json.loads(request.data)
+        return _FakeResponse({
+            "output_text": json.dumps([{"i": 0, "score": 84, "rationale": "Genre-relevant"}])
+        })
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen)
+    candidates = [{"start": 4, "end": 14, "score": 50, "text": "The final transformation.", "features": {}}]
+
+    llm.score_candidates(candidates, "The final transformation.", genre="anime")
+
+    prompt = json.loads(observed["body"]["input"][1]["content"][0]["text"])
+    assert prompt["genre"] == "anime"
+

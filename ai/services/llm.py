@@ -219,6 +219,7 @@ def score_candidates(
     transcript: str,
     instruction: str | None = None,
     media_path: str | None = None,
+    genre: str | None = "auto",
 ) -> list[dict]:
     if not candidates:
         return candidates
@@ -252,6 +253,7 @@ def score_candidates(
     } for i, c in enumerate(candidates[:80])]
     prompt = {
         "instruction": instruction or "Rank moments by genuine clip-worthiness.",
+        "genre": genre or "auto",
         "transcript_context": transcript[:30000],
         "candidates": compact,
         "visual_evidence_note": (

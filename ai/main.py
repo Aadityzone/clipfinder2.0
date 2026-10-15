@@ -198,7 +198,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         }
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
-    result = score_candidates(result, transcript, b.instruction, media_path=b.media_path)
+    result = score_candidates(result, transcript, b.instruction, media_path=b.media_path, genre=b.genre)
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]
@@ -227,7 +227,7 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     # Let the model compare a wider candidate pool before selecting the final six.
     items = stories(b.segments, limit=40)
     transcript = " ".join(str(segment.get("text", "")) for segment in b.segments)
-    items = score_candidates(items, transcript, b.instruction, media_path=b.media_path)
+    items = score_candidates(items, transcript, b.instruction, media_path=b.media_path, genre=b.genre)
     items = apply_genre_profile(items, transcript, b.genre)
     items = deduplicate(items, threshold=0.55)
     items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)[:6]
