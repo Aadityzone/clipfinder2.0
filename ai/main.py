@@ -225,6 +225,10 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     items = stories(b.segments)
+    transcript = " ".join(str(segment.get("text", "")) for segment in b.segments)
+    items = score_candidates(items, transcript, b.instruction, media_path=b.media_path)
+    items = apply_genre_profile(items, transcript, b.genre)
+    items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)[:6]
     meta = package(b.segments, items)
     return {"stories": items, **meta}
 
