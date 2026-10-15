@@ -19,3 +19,115 @@ def test_dedup_keeps_highest_scoring_overlap():
     result=deduplicate(items)
     assert len(result)==2
     assert result[0]["score"]==90
+
+
+def test_analyze_forwards_explicit_genre_to_ranking(monkeypatch):
+    from ai import main
+
+    observed = {}
+    candidate = {
+        "start": 1.0,
+        "end": 8.0,
+        "score": 50.0,
+        "text": "A surprising gaming clutch!",
+        "category": "ai_detect",
+        "rationale": "test evidence",
+        "features": {},
+    }
+
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "candidates", lambda *args, **kwargs: [dict(candidate)])
+    monkeypatch.setattr(main, "optimize_candidates", lambda _segments, rows: rows)
+    monkeypatch.setattr(main, "enrich_semantics", lambda rows, _instruction: rows)
+    monkeypatch.setattr(main, "deduplicate", lambda rows: rows)
+    monkeypatch.setattr(main, "score_candidates", lambda rows, _transcript, _instruction, **_kwargs: rows)
+    def record_genre(rows, _transcript, genre):
+        observed["genre"] = genre
+        return rows
+
+    monkeypatch.setattr(main, "apply_genre_profile", record_genre)
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda rows, _preferences: rows)
+
+    result = main.analyze(main.AnalyzeRequest(
+        segments=[{"start": 1.0, "end": 8.0, "text": "A surprising gaming clutch!"}],
+        genre="gaming",
+    ))
+
+    assert observed["genre"] == "gaming"
+    assert result["candidates"]
+
+def test_highlight_cues_do_not_match_inside_unrelated_words():
+    from ai.highlights import _contains_cue
+
+    assert not _contains_cue("the window is open", "win")
+    assert not _contains_cue("a useful skill for beginners", "kill")
+    assert _contains_cue("That was a huge win!", "win")
+    assert _contains_cue("I can't believe it", "can't believe")
+
+def test_candidates_receive_grounded_title_fallbacks_without_an_llm():
+    from ai.main import _ensure_candidate_titles
+
+    result = _ensure_candidate_titles([
+        {"start": 0, "end": 10, "text": "The final reveal changes everything in the story tonight.", "features": {}},
+        {"start": 65, "end": 80, "text": "", "category": "ai_detect", "features": {"eventKind": "visual_change"}},
+    ])
+
+    assert result[0]["title"] == "The final reveal changes everything in the story…"
+    assert result[0]["features"]["titleSource"] == "transcript_extract"
+    assert result[1]["title"] == "Visual Change at 01:05"
+    assert result[1]["features"]["titleSource"] == "visual_timestamp"
+
+def test_longform_rejects_missing_media_path(monkeypatch, tmp_path):
+    import pytest
+    from fastapi import HTTPException
+    from ai import main
+
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    request = main.AnalyzeRequest(
+        segments=[{"start": 0, "end": 5, "text": "A complete story."}],
+        media_path=str(tmp_path / "missing.mp4"),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        main.longform(request)
+
+    assert error.value.status_code == 404
+
+
+def test_longform_clips_ranked_stories_to_media_duration(monkeypatch, tmp_path):
+    from ai import main
+
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"test")
+    candidate = {
+        "start": 80,
+        "end": 120,
+        "score": 140,
+        "text": "The story reaches its final payoff.",
+        "title": "The Final Payoff",
+        "rationale": "A grounded ending.",
+        "features": {"story": {"payoff": 0.9}},
+    }
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "ffprobe", lambda _path: {"duration": 100})
+    monkeypatch.setattr(main, "stories", lambda _segments, limit: [dict(candidate)])
+    monkeypatch.setattr(
+        main, "score_candidates",
+        lambda rows, _transcript, _instruction, **_kwargs: rows,
+    )
+    monkeypatch.setattr(main, "apply_genre_profile", lambda rows, _transcript, _genre: rows)
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda rows, _preferences: rows)
+    monkeypatch.setattr(main, "deduplicate", lambda rows, threshold: rows)
+
+    result = main.longform(main.AnalyzeRequest(
+        segments=[{"start": 0, "end": 100, "text": "The story reaches its final payoff."}],
+        media_path=str(media),
+        genre="podcast",
+        creator_preferences={},
+    ))
+
+    assert len(result["stories"]) == 1
+    assert result["stories"][0]["start"] == 80
+    assert result["stories"][0]["end"] == 100
+    assert result["stories"][0]["score"] == 100
+    assert result["chapters"][0]["start"] == 80.0

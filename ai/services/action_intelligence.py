@@ -25,11 +25,23 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _contains_term(text: str, term: str) -> bool:
+    """Match OCR cues as whole words/phrases to avoid substring false positives."""
+    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\\s+", " ", term.lower()).strip()
+    return bool(
+        phrase
+        and re.search(
+            r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])",
+            normalized,
+        )
+    )
+
+
 def _classify_ocr(text: str) -> list[str]:
-    low = text.lower()
     found = []
     for label, terms in ACTION_TERMS.items():
-        if any(term in low for term in terms):
+        if any(_contains_term(text, term) for term in terms):
             found.append(label)
     return found
 

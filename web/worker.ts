@@ -85,7 +85,7 @@ if(j.type==="TRANSCRIBE"){
   });
   return;
 }
-if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});await setJobProgress(j.id,.2,"ANALYZING");const r=await ai("/v1/longform",{segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text}))});await setJobProgress(j.id,.85,"ANALYZING");await assertJobNotCancelled(j.id);for(const c of r.stories){await db.clip.create({data:{projectId:project.id,startS:c.start,endS:c.end,score:c.score,category:"long_form_story",title:c.title,status:"CANDIDATE",metadata:{rationale:c.rationale}}})}const sourceAsset=project.sourceId?await db.mediaAsset.findFirst({where:{sourceId:project.sourceId}}):null;if(sourceAsset){const thumbKey="long-form/"+project.id+"/thumbnail.jpg";const thumbPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",thumbKey);await ai("/v1/thumbnail",{input_path:await ensureLocalStorage(sourceAsset.storageKey),output_path:thumbPath,time:Number(r.chapters?.[0]?.start||0)});await assertJobNotCancelled(j.id);await putFile(thumbKey,thumbPath,"image/jpeg");await db.longFormDocument.upsert({where:{projectId:project.id},create:{projectId:project.id,transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey},update:{transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey}});}await assertJobNotCancelled(j.id);await finishJob(j.id);return}
+if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});const instructionLines=(project.customInstructions||"").split("\n");const genreLine=instructionLines.find((x:string)=>x.startsWith("Content genre:"))||"";const genre=genreLine.replace("Content genre:","").trim()||"auto";const instruction=instructionLines.filter((x:string)=>!x.startsWith("Clip categories:")&&!x.startsWith("Content genre:")).join("\n").trim()||undefined;const sourceAsset=project.sourceId?await db.mediaAsset.findFirst({where:{sourceId:project.sourceId}}):null;const mediaPath=sourceAsset?await ensureLocalStorage(sourceAsset.storageKey):undefined;await setJobProgress(j.id,.2,"ANALYZING");const r=await ai("/v1/longform",{segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text})),instruction,genre,media_path:mediaPath});await setJobProgress(j.id,.85,"ANALYZING");await assertJobNotCancelled(j.id);for(const c of r.stories){await db.clip.create({data:{projectId:project.id,startS:c.start,endS:c.end,score:c.score,category:"long_form_story",title:c.title,status:"CANDIDATE",metadata:{rationale:c.rationale,features:c.features}}})}if(sourceAsset){const thumbKey="long-form/"+project.id+"/thumbnail.jpg";const thumbPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",thumbKey);await ai("/v1/thumbnail",{input_path:await ensureLocalStorage(sourceAsset.storageKey),output_path:thumbPath,time:Number(r.chapters?.[0]?.start||0)});await assertJobNotCancelled(j.id);await putFile(thumbKey,thumbPath,"image/jpeg");await db.longFormDocument.upsert({where:{projectId:project.id},create:{projectId:project.id,transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey},update:{transcriptId:t.id,title:r.title,description:r.description,chapters:r.chapters,thumbnailKey:thumbKey}});}await assertJobNotCancelled(j.id);await finishJob(j.id);return}
  if(j.type==="ANALYZE"){
   const p=j.payload as any;
   const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});
@@ -99,15 +99,19 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
     await finishJob(j.id);
     return;
   }
-  const categoryLine=(project.customInstructions||"").split("\n").find((x:string)=>x.startsWith("Clip categories:"))||"";
+  const instructionLines=(project.customInstructions||"").split("\n");
+  const categoryLine=instructionLines.find((x:string)=>x.startsWith("Clip categories:"))||"";
+  const genreLine=instructionLines.find((x:string)=>x.startsWith("Content genre:"))||"";
+  const genre=genreLine.replace("Content genre:","").trim()||"auto";
   const categories=categoryLine.replace("Clip categories:","").split(",").map((x:string)=>x.trim()).filter(Boolean);
+  const instructions=instructionLines.filter((x:string)=>!x.startsWith("Clip categories:")&&!x.startsWith("Content genre:")).join("\n").trim()||undefined;
   await setJobProgress(j.id,.15,"ANALYZING");
   const mediaAsset=await db.mediaAsset.findUniqueOrThrow({where:{id:t.mediaAssetId}});
   const feedback=await loadCreatorFeedbackProfile(j.userId);
   await setJobProgress(j.id,.35,"ANALYZING");
   const result=await ai("/v1/analyze",{
     segments:t.segments.map(s=>({start:s.startS,end:s.endS,text:s.text})),
-    instruction:project.customInstructions,categories,
+    instruction:instructions,categories,genre,
     media_path:await ensureLocalStorage(mediaAsset.storageKey),
     creator_preferences:feedback.active?feedback.weights:{},
   });
@@ -130,6 +134,7 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
       clip:{create:{
         project:{connect:{id:project.id}},
         startS:Number(c.start),endS:Number(c.end),score:Number(c.score)||0,
+        title:typeof c.title==="string"&&c.title.trim()?c.title.trim().slice(0,120):undefined,
         category:String(c.category||"AI Detect"),status:"CANDIDATE",
       }},
     }))},

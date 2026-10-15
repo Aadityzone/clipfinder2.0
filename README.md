@@ -727,6 +727,39 @@ From the repository root:
 python -m uvicorn ai.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+### Run a real AI pipeline smoke test
+
+With the AI dependencies and FFmpeg installed, run a real source video through
+transcription, multimodal analysis, ranking, and MP4 rendering:
+
+```bash
+PYTHONPATH=. python ai/scripts/smoke_pipeline.py --source path/to/video.mp4 --genre gaming
+```
+
+Or use a supported public source URL:
+
+```bash
+PYTHONPATH=. python ai/scripts/smoke_pipeline.py --url "https://www.youtube.com/watch?v=..." --genre podcast --top 3
+```
+
+The command writes `transcript.json`, rendered `clip-XX.mp4` files, and
+`report.json` to `artifacts/ai-smoke` by default. It runs the actual models
+and media tools; it is not a mocked test. The first run may download Whisper
+model weights. A smoke-test pass proves that specific source completed the
+pipeline, not that the selected moments are universally high quality.
+
+### Measure highlight quality
+
+Use human-labelled benchmark JSON files with `predictions`, `ground_truth`,
+and an optional `genre` field:
+
+```bash
+PYTHONPATH=. python ai/scripts/evaluate_highlights.py benchmarks/ --recursive --top-k 10 --iou 0.5
+```
+
+Use manually reviewed labels to interpret precision, recall, F1, and timestamp
+overlap; do not treat unlabelled model output as an accuracy benchmark.
+
 ### Worker
 
 ```bash

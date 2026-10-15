@@ -9,7 +9,7 @@ from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
 from .services.dedup import deduplicate
-from .services.llm import score_candidates
+from .services.llm import score_candidates, ranking_capabilities
 from .services.semantic import enrich_semantics
 from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
@@ -18,6 +18,8 @@ from .services.visual_intelligence import semantic_frame_scores, visual_capabili
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
 from .services.genre_intelligence import apply_genre_profile, VALID_GENRES
+from .services.candidate_contract import validate_candidates
+from .services.visual_candidates import multimodal_event_candidates
 import hmac
 import os
 import uuid
@@ -150,18 +152,66 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES)}
+    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES), "ranking": ranking_capabilities()}
+
+def _ensure_candidate_titles(candidates: list[dict]) -> list[dict]:
+    """Give every candidate a transparent title fallback when no LLM title exists."""
+    for candidate in candidates:
+        title = candidate.get("title")
+        if isinstance(title, str) and title.strip():
+            continue
+        features = candidate.setdefault("features", {})
+        words = str(candidate.get("text") or "").split()
+        if words:
+            title = " ".join(words[:8]).strip(" .,!?:;")
+            if len(words) > 8:
+                title += "…"
+            features["titleSource"] = "transcript_extract"
+        else:
+            try:
+                start = max(0, int(float(candidate.get("start", 0))))
+            except (TypeError, ValueError, OverflowError):
+                start = 0
+            timestamp = f"{start // 60:02d}:{start % 60:02d}"
+            event = str(features.get("eventKind") or candidate.get("category") or "visual highlight")
+            title = f"{event.replace('_', ' ').title()} at {timestamp}"
+            features["titleSource"] = "visual_timestamp"
+        candidate["title"] = title or "Untitled highlight"
+    return candidates
+
 
 @app.post("/v1/analyze", response_model=AnalyzeResponse)
 def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
+    media_duration = None
+    if b.media_path:
+        if not os.path.isfile(b.media_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        media_duration = ffprobe(b.media_path).get("duration")
     media = analyze_media(b.media_path) if b.media_path else {}
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
+    # Optimize transcript-centered candidates before adding visual-only event windows;
+    # the latter must keep their measured event timestamps rather than snap to speech.
+    if b.segments:
+        result = optimize_candidates(b.segments, result)
+    requested_categories = {str(category).strip().lower().replace("_", " ") for category in b.categories}
+    allow_visual_proposals = not requested_categories or bool(
+        requested_categories & {"ai detect", "general", "all"}
+    )
+    if allow_visual_proposals and media:
+        result.extend(multimodal_event_candidates(
+            b.segments, media, media_duration, max_candidates=40
+        ))
     result = enrich_semantics(result, b.instruction)
-    result = optimize_candidates(b.segments, result)
-    diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
+    # Enforce one genre-neutral contract before any downstream feature extraction.
+    result = validate_candidates(result, media_duration)
+    diarized = (
+        diarize(b.media_path, b.segments)
+        if b.media_path and b.segments
+        else {"available": False, "segments": [], "reason": "media or transcript segments unavailable"}
+    )
     analysis_segments = diarized.get("segments") or b.segments
     speaker = speaker_signals(analysis_segments)
     for candidate in result:
@@ -174,8 +224,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         }
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
-    result = score_candidates(result, transcript, b.instruction)
-    result = apply_genre_profile(result, transcript, b.genre)
+    result = score_candidates(result, transcript, b.instruction, media_path=b.media_path, genre=b.genre)
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]
@@ -190,14 +239,39 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             }
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
+    # Genre profiles can now use speaker-turn and diarization features when available.
+    result = apply_genre_profile(result, transcript, b.genre)
     result = apply_creator_preferences(result, b.creator_preferences)
+    result = _ensure_candidate_titles(result)
+    # Revalidate after model/profile adjustments so the API never emits invalid scores.
+    result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
 
 @app.post("/v1/longform", response_model=LongFormResponse)
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    items = stories(b.segments)
+    media_duration = None
+    if b.media_path:
+        if not os.path.isfile(b.media_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        media_duration = ffprobe(b.media_path).get("duration")
+
+    # Let the model compare a wider candidate pool before selecting the final six.
+    # Apply the same genre-neutral contract used by short-form analysis so invalid
+    # timestamps and non-finite/out-of-range scores cannot leak into chapters.
+    items = validate_candidates(stories(b.segments, limit=40), media_duration)
+    transcript = " ".join(str(segment.get("text", "")) for segment in b.segments)
+    items = score_candidates(
+        items, transcript, b.instruction, media_path=b.media_path, genre=b.genre
+    )
+    items = apply_genre_profile(items, transcript, b.genre)
+    items = apply_creator_preferences(items, b.creator_preferences)
+    items = validate_candidates(items, media_duration)
+    items = deduplicate(items, threshold=0.55)
+    items = validate_candidates(items, media_duration)
+    items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)[:6]
+    items = _ensure_candidate_titles(items)
     meta = package(b.segments, items)
     return {"stories": items, **meta}
 

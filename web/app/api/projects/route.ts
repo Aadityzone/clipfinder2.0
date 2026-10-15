@@ -72,7 +72,10 @@ export async function POST(req: NextRequest) {
     const name = String(body.name ?? "Untitled project").trim().slice(0, 120) || "Untitled project";
     const categories = Array.isArray(body.categories) ? body.categories.map(String).slice(0, 8) : ["AI Detect"];
     const instructions = String(body.customInstructions ?? "").trim().slice(0, 2000);
+    const allowedGenres = new Set(["auto", "general", "gaming", "irl_stream", "movies_tv", "anime", "tech", "knowledge", "facts", "podcast"]);
+    const requestedGenre = typeof body.genre === "string" && allowedGenres.has(body.genre) ? body.genre : "auto";
     const customInstructions = [
+      "Content genre: " + requestedGenre,
       categories.length ? "Clip categories: " + categories.join(", ") : "",
       instructions,
     ].filter(Boolean).join("\n\n") || null;
