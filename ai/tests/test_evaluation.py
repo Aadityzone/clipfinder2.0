@@ -71,3 +71,30 @@ def test_aggregate_empty_reports_is_safe():
     result = aggregate_evaluation_reports([])
     assert result["benchmarkCount"] == 0
     assert result["f1AtK"] == 0
+
+
+
+def test_evaluation_rejects_non_finite_timestamps_and_thresholds():
+    predictions = [
+        {"start": float("nan"), "end": 10, "score": 100},
+        {"start": 0, "end": float("inf"), "score": 90},
+        {"start": 1, "end": 4, "score": 80},
+    ]
+    labels = [
+        {"start": float("nan"), "end": 3},
+        {"start": 1, "end": float("inf")},
+        {"start": 1, "end": 4},
+    ]
+    result = evaluate_ranked_candidates(
+        predictions, labels, top_k=10, iou_threshold=float("nan")
+    )
+    assert result["validPredictionCount"] == 1
+    assert result["groundTruthCount"] == 1
+    assert result["iouThreshold"] == 0.5
+    assert result["matchedCount"] == 1
+
+
+def test_interval_iou_rejects_non_finite_boundaries():
+    assert interval_iou(
+        {"start": 0, "end": float("inf")}, {"start": 0, "end": 5}
+    ) == 0.0

@@ -6,6 +6,7 @@ These metrics help compare changes without claiming that heuristics are accurate
 from __future__ import annotations
 
 from collections.abc import Sequence
+import math
 from typing import Any
 
 
@@ -14,6 +15,8 @@ def interval_iou(a: dict[str, Any], b: dict[str, Any]) -> float:
         a_start, a_end = float(a["start"]), float(a["end"])
         b_start, b_end = float(b["start"]), float(b["end"])
     except (KeyError, TypeError, ValueError):
+        return 0.0
+    if not all(map(math.isfinite, (a_start, a_end, b_start, b_end))):
         return 0.0
     if a_end <= a_start or b_end <= b_start:
         return 0.0
@@ -31,7 +34,11 @@ def evaluate_ranked_candidates(
 ) -> dict[str, Any]:
     """Greedily match top-ranked predictions to unique labels and report metrics."""
     k = max(1, int(top_k))
-    threshold = min(1.0, max(0.0, float(iou_threshold)))
+    try:
+        requested_threshold = float(iou_threshold)
+    except (TypeError, ValueError, OverflowError):
+        requested_threshold = 0.5
+    threshold = min(1.0, max(0.0, requested_threshold)) if math.isfinite(requested_threshold) else 0.5
     ranked = sorted(
         (p for p in predictions if _valid_interval(p)),
         key=lambda item: _finite_score(item.get("score")),
@@ -129,7 +136,7 @@ def _valid_interval(item: dict[str, Any]) -> bool:
         start, end = float(item["start"]), float(item["end"])
     except (KeyError, TypeError, ValueError):
         return False
-    return start >= 0 and end > start
+    return math.isfinite(start) and math.isfinite(end) and start >= 0 and end > start
 
 
 def _finite_score(value: Any) -> float:
