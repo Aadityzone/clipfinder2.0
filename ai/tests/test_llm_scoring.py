@@ -170,3 +170,18 @@ def test_provider_failure_is_recorded_without_breaking_deterministic_scores(monk
         "errorType": "TimeoutError",
     }
 
+def test_model_title_is_parsed_and_attached_to_candidate(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([{
+            "i": 0, "score": 88, "rationale": "A clear payoff",
+            "title": "The Unexpected Final Turn",
+        }])
+    }))
+    candidates = [{"start": 2, "end": 12, "score": 50, "text": "Then everything changed.", "features": {}}]
+
+    result = llm.score_candidates(candidates, "Then everything changed.")
+
+    assert result[0]["title"] == "The Unexpected Final Turn"
+    assert result[0]["features"]["llmScore"] == 88.0
+

@@ -134,6 +134,7 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
       clip:{create:{
         project:{connect:{id:project.id}},
         startS:Number(c.start),endS:Number(c.end),score:Number(c.score)||0,
+        title:typeof c.title==="string"&&c.title.trim()?c.title.trim().slice(0,120):undefined,
         category:String(c.category||"AI Detect"),status:"CANDIDATE",
       }},
     }))},

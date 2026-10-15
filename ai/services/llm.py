@@ -78,8 +78,8 @@ def _ollama_request_body(
         {
             "role": "system",
             "content": (
-                "Return JSON only: an array of objects with i, score (0-100), rationale. "
-                "Rank genuine clip-worthiness using transcript and any attached single-frame evidence. "
+                "Return JSON only: an array of objects with i, score (0-100), rationale, and a concise grounded title. "
+                "Rank genuine clip-worthiness using transcript and any attached single-frame evidence. Add a concise, accurate title grounded in the transcript. "
                 "A still image cannot prove motion, dialogue, or an outcome. Do not invent events."
             ),
         },
@@ -127,10 +127,14 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
             continue
         if index < 0 or not 0 <= score <= 100:
             continue
-        ranked[index] = {
+        ranking = {
             "score": score,
             "rationale": str(item.get("rationale") or "").strip(),
         }
+        title = item.get("title")
+        if isinstance(title, str) and title.strip():
+            ranking["title"] = title.strip()[:120]
+        ranked[index] = ranking
     return ranked
 
 
@@ -296,6 +300,8 @@ def score_candidates(
                 candidate["score"] = round(float(candidate.get("score", 0)) * .55 + llm_score * .45, 2)
                 if item["rationale"]:
                     candidate["rationale"] = item["rationale"]
+                if item.get("title"):
+                    candidate["title"] = item["title"]
                 features = candidate.setdefault("features", {})
                 features["llmScore"] = llm_score
                 features["llmProvider"] = provider
