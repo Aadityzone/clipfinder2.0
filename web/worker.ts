@@ -1,5 +1,13 @@
 import {db} from "./lib/db";import {loadCreatorFeedbackProfile} from "./lib/creator-feedback";import {claimNextJob,finishJob,failJob,assertJobNotCancelled,completeJobAndEnqueue} from "./lib/jobs";import path from "node:path";import{ensureLocalStorage,putFile}from"./lib/storage";import{downloadGoogleDrive}from"./lib/sources/google-drive";import{publishYouTube}from"./lib/publish/youtube";import{publishTikTok,tiktokPublishStatus}from"./lib/publish/tiktok";
-const sleep=(n:number)=>new Promise(r=>setTimeout(r,n));const AI=process.env.AI_SERVICE_URL||"http://127.0.0.1:8000";
+const sleep=(n:number)=>new Promise(r=>setTimeout(r,n));const AI=process.env.AI_SERVICE_URL||"http://127.0.0.1:8000";const MAX_SOURCE_CHUNK_SECONDS=3600;
+async function finishAnalysisAndQueueNext(j:any,p:any,mediaAssetId:string){
+ const range=p.sourceRange;const sourceDurationS=Number(p.sourceDurationS||0);const end=Number(range?.endSeconds);
+ if(p.continueAfterRange&&range&&Number.isFinite(sourceDurationS)&&Number.isFinite(end)&&end<sourceDurationS){
+  const nextRange={startSeconds:end,endSeconds:Math.min(sourceDurationS,end+MAX_SOURCE_CHUNK_SECONDS)};
+  return completeJobAndEnqueue(j.id,{userId:j.userId,projectId:j.projectId,type:"TRANSCRIBE",payload:{mediaAssetId,sourceRange:nextRange,sourceDurationS,continueAfterRange:true}});
+ }
+ return finishJob(j.id);
+}
 async function setJobProgress(id:string,progress:number,status?:"DOWNLOADING"|"INGESTING"|"TRANSCRIBING"|"ANALYZING"|"RENDERING"){await db.job.updateMany({where:{id,status:{notIn:["CANCELLED","READY","FAILED"]}},data:{progress,...(status?{status}:{})}})}
 async function ai(pathname:string,body:unknown){const r=await fetch(AI+pathname,{method:"POST",headers:{"content-type":"application/json",...(process.env.AI_SERVICE_SECRET?{"x-ai-secret":process.env.AI_SERVICE_SECRET}:{})},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
 async function queueDuePosts(){const due=await db.scheduledPost.findMany({where:{status:"SCHEDULED",scheduledFor:{lte:new Date()}},take:10});for(const post of due){const changed=await db.scheduledPost.updateMany({where:{id:post.id,status:"SCHEDULED"},data:{status:"PUBLISHING",error:null}});if(changed.count)await db.job.create({data:{userId:post.userId,type:"PUBLISH",projectId:post.clipId?((await db.clip.findUnique({where:{id:post.clipId},select:{projectId:true}}))?.projectId):undefined,payload:{scheduledPostId:post.id}}})}}
@@ -45,19 +53,21 @@ async function tick(){await queueDuePosts();const j=await claimNextJob();if(!j)r
     }});
   }
   await assertJobNotCancelled(j.id);
-  const sourceRange=p.sourceRange;
+  let sourceRange=p.sourceRange||null;
+  const sourceDurationS=Number(asset.durationS||0);
+  if(!Number.isFinite(sourceDurationS)||sourceDurationS<=0)throw new Error("Source media has no valid duration.");
+  const continueAfterRange=!sourceRange&&project.mode!=="LONG_FORM"&&sourceDurationS>MAX_SOURCE_CHUNK_SECONDS;
+  if(!sourceRange&&project.mode!=="LONG_FORM")sourceRange={startSeconds:0,endSeconds:Math.min(sourceDurationS,MAX_SOURCE_CHUNK_SECONDS)};
   if(sourceRange){
     const start=Number(sourceRange.startSeconds), end=Number(sourceRange.endSeconds);
-    if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end-start>3600){
+    if(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start||end-start>MAX_SOURCE_CHUNK_SECONDS){
       throw new Error("Invalid source range. Each requested range must be no longer than one hour.");
     }
-    if(!Number.isFinite(Number(asset.durationS))||end>Number(asset.durationS)+0.05){
-      throw new Error("Requested source range extends beyond the source video duration.");
-    }
+    if(end>sourceDurationS+0.05)throw new Error("Requested source range extends beyond the source video duration.");
   }
   await completeJobAndEnqueue(j.id,{
     userId:j.userId,projectId:j.projectId,type:"TRANSCRIBE",
-    payload:{mediaAssetId:asset.id,sourceRange:sourceRange||null},
+    payload:{mediaAssetId:asset.id,sourceRange,sourceDurationS,continueAfterRange},
   });
   return;
 }
@@ -66,17 +76,26 @@ if(j.type==="TRANSCRIBE"){
   const p=j.payload as any;
   const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!},select:{outputLanguage:true,mode:true}});
   const asset=await db.mediaAsset.findUniqueOrThrow({where:{id:p.mediaAssetId}});
-  let transcript=await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId},orderBy:{createdAt:"desc"}});
+  const sourceDurationS=Number(p.sourceDurationS??asset.durationS??0);
+  let sourceRange=p.sourceRange||null;
+  let continueAfterRange=Boolean(p.continueAfterRange);
+  if(!sourceRange&&project.mode!=="LONG_FORM"){
+    sourceRange={startSeconds:0,endSeconds:Math.min(sourceDurationS,MAX_SOURCE_CHUNK_SECONDS)};
+    continueAfterRange=sourceRange.endSeconds<sourceDurationS;
+  }
+  let transcript=sourceRange
+    ?await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId,metadata:{path:["sourceStartS"],equals:Number(sourceRange.startSeconds)}},orderBy:{createdAt:"desc"}})
+    :await db.transcript.findFirst({where:{mediaAssetId:p.mediaAssetId},orderBy:{createdAt:"desc"}});
   let duration=Number((transcript?.metadata as any)?.duration||0);
   if(!transcript){
     const localMedia=await ensureLocalStorage(asset.storageKey);
     await setJobProgress(j.id,.2,"TRANSCRIBING");
-    const result=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined,...(p.sourceRange?{start_seconds:Number(p.sourceRange.startSeconds),end_seconds:Number(p.sourceRange.endSeconds)}:{})});
+    const result=await ai("/v1/transcribe",{media_path:localMedia,language:project.outputLanguage||undefined,...(sourceRange?{start_seconds:Number(sourceRange.startSeconds),end_seconds:Number(sourceRange.endSeconds)}:{})});
     await setJobProgress(j.id,.85,"TRANSCRIBING");
     await assertJobNotCancelled(j.id);
     transcript=await db.transcript.create({data:{
       mediaAssetId:p.mediaAssetId,language:result.language,text:result.text,
-      metadata:{duration:result.duration,sourceStartS:result.sourceStartS??0,sourceEndS:result.sourceEndS??result.duration},
+      metadata:{duration:result.duration,sourceStartS:result.sourceStartS??sourceRange?.startSeconds??0,sourceEndS:result.sourceEndS??sourceRange?.endSeconds??result.duration,sourceDurationS},
       segments:{create:result.segments.map((s:any)=>({
         startS:s.start,endS:s.end,text:s.text,confidence:s.confidence,
         words:{create:(s.words||[]).map((w:any)=>({
@@ -91,7 +110,7 @@ if(j.type==="TRANSCRIBE"){
   await completeJobAndEnqueue(j.id,{
     userId:j.userId,projectId:j.projectId,
     type:project.mode==="LONG_FORM"?"LONGFORM_ANALYZE":"ANALYZE",
-    payload:{transcriptId:transcript.id},
+    payload:{transcriptId:transcript.id,sourceRange,sourceDurationS,continueAfterRange},
   });
   return;
 }
@@ -100,13 +119,15 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
   const p=j.payload as any;
   const t=await db.transcript.findUniqueOrThrow({where:{id:p.transcriptId},include:{segments:true}});
   const project=await db.project.findUniqueOrThrow({where:{id:j.projectId!}});
+  const sourceRange=p.sourceRange||null;
+  const analysisVersion=sourceRange?"2.3.0-range-"+String(Number(sourceRange.startSeconds)):"2.3.0";
   const existing=await db.analysis.findFirst({
-    where:{projectId:project.id,model:"multimodal-heuristic-v2",version:"2.3.0"},
+    where:{projectId:project.id,model:"multimodal-heuristic-v2",version:analysisVersion},
     select:{id:true},
   });
   if(existing){
     await assertJobNotCancelled(j.id);
-    await finishJob(j.id);
+    await finishAnalysisAndQueueNext(j,p,t.mediaAssetId);
     return;
   }
   const instructionLines=(project.customInstructions||"").split("\n");
@@ -127,9 +148,13 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
   });
   await setJobProgress(j.id,.85,"ANALYZING");
   await assertJobNotCancelled(j.id);
-  const candidates=Array.isArray(result.candidates)?result.candidates:[];
+  const candidates=Array.isArray(result.candidates)?result.candidates.filter((c:any)=>{
+    if(!sourceRange)return true;
+    const start=Number(c.start),end=Number(c.end);
+    return Number.isFinite(start)&&Number.isFinite(end)&&start>=Number(sourceRange.startSeconds)&&end<=Number(sourceRange.endSeconds);
+  }):[];
   await db.analysis.create({data:{
-    projectId:project.id,model:"multimodal-heuristic-v2",version:"2.3.0",
+    projectId:project.id,model:"multimodal-heuristic-v2",version:analysisVersion,
     metadata:{
       candidateCount:candidates.length,
       creatorFeedback:{
@@ -150,7 +175,7 @@ if(j.type==="LONGFORM_ANALYZE"){const p=j.payload as any;const t=await db.transc
     }))},
   }});
   await assertJobNotCancelled(j.id);
-  await finishJob(j.id);
+  await finishAnalysisAndQueueNext(j,p,t.mediaAssetId);
   return;
 }
 if(j.type==="LONGFORM_RENDER"){const p=j.payload as any;const doc=await db.longFormDocument.findUniqueOrThrow({where:{id:p.documentId},include:{project:{include:{source:{include:{media:true}}}}}});const asset=doc.project.source?.media[0];if(!asset)throw new Error("Long-form source media missing");await db.longFormDocument.update({where:{id:doc.id},data:{renderStatus:"PROCESSING"}});const outputKey="long-form/"+doc.projectId+"/render-"+Date.now()+".mp4";const outputPath=path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage",outputKey);const tr=doc.transcriptId?await db.transcript.findUnique({where:{id:doc.transcriptId},include:{segments:true}}):null;const captions=(tr?.segments||[]).map((s:any)=>({start:Number(s.startS),end:Number(s.endS),text:s.text}));const mediaPath=await ensureLocalStorage(asset.storageKey);await ai("/v1/render",{input_path:mediaPath,output_path:outputPath,start:0,end:Number(asset.durationS||0),aspect:"16:9",segments:[{start:0,end:Number(asset.durationS||0)}],captions});await assertJobNotCancelled(j.id);await putFile(outputKey,outputPath,"video/mp4");await db.longFormDocument.update({where:{id:doc.id},data:{renderStatus:"READY",renderKey:outputKey}});await assertJobNotCancelled(j.id);await finishJob(j.id);return}
