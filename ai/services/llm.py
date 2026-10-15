@@ -32,11 +32,17 @@ def ranking_capabilities() -> dict:
             "visualRanking": True,
         }
     if os.getenv("OLLAMA_BASE_URL", "").strip():
+        model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+        normalized = model.lower()
+        vision_model = any(
+            marker in normalized
+            for marker in ("qwen2.5vl", "qwen3-vl", "llava", "minicpm-v", "vision", "gemma3")
+        )
         return {
             "provider": "ollama",
             "configured": True,
-            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b"),
-            "visualRanking": True,
+            "model": model,
+            "visualRanking": vision_model,
         }
     return {
         "provider": "heuristic",
