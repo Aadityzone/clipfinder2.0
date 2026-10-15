@@ -49,7 +49,7 @@ export default function NewProject() {
       const data = await readResult(response);
       if (!response.ok || !data.id) { setError(data.error ?? "Project creation failed. Please try again."); return; }
       if (file) {
-        const upload = await fetch("/api/projects/" + data.id + "/upload", { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-file-name": encodeURIComponent(file.name) }, body: file });
+        const upload = await fetch("/api/projects/" + data.id + "/upload", { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-file-name": encodeURIComponent(file.name), ...(sourceStartSeconds.trim() && sourceEndSeconds.trim() ? { "x-source-start-seconds": sourceStartSeconds, "x-source-end-seconds": sourceEndSeconds } : {}) }, body: file });
         const uploaded = await readResult(upload);
         if (!upload.ok) { setError(uploaded.error ?? "The project was created, but the upload failed. You can reopen it and retry."); return; }
       }
