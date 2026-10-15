@@ -129,3 +129,29 @@ def test_local_ollama_scores_candidates_without_cloud_api_key(monkeypatch):
     assert result[0]["features"]["llmProvider"] == "ollama"
     assert result[0]["features"]["llmScore"] == 92.0
 \n
+
+def test_ranking_capabilities_reports_local_provider_without_secrets(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:3b")
+
+    result = llm.ranking_capabilities()
+
+    assert result == {
+        "provider": "ollama",
+        "configured": True,
+        "model": "qwen2.5:3b",
+        "visualRanking": True,
+    }
+    assert "apiKey" not in result
+
+
+def test_ranking_capabilities_explicitly_reports_heuristic_fallback(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+
+    result = llm.ranking_capabilities()
+
+    assert result["provider"] == "heuristic"
+    assert result["configured"] is False
+\n
