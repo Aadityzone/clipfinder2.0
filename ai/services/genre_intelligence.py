@@ -67,8 +67,8 @@ def normalize_genre(genre: str | None) -> str:
 
 def _contains_cue(text: str, cue: str) -> bool:
     """Match complete words/phrases instead of accidental substrings (e.g. kill/skill)."""
-    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
-    phrase = re.sub(r"\\s+", " ", cue.lower()).strip()
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\s+", " ", cue.lower()).strip()
     return bool(re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", normalized))
 
 
