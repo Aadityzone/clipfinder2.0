@@ -120,39 +120,61 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
     return ranked
 
 
-def _candidate_frame_data_url(media_path: str, time_s: float) -> str | None:
-    """Encode one bounded, low-resolution frame for visual model evidence."""
+def _candidate_frame_data_urls(
+    media_path: str,
+    candidates: list[dict],
+    limit: int = 12,
+) -> dict[int, str]:
+    """Sample a bounded set of candidate frames using one video decoder handle."""
     if not media_path or not os.path.isfile(media_path):
-        return None
+        return {}
     capture = None
+    result: dict[int, str] = {}
     try:
         import cv2
 
         capture = cv2.VideoCapture(media_path)
         if not capture.isOpened():
-            return None
-        capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, float(time_s)) * 1000)
-        ok, frame = capture.read()
-        if not ok or frame is None:
-            return None
-        height, width = frame.shape[:2]
-        scale = min(1.0, 512.0 / max(height, width))
-        if scale < 1.0:
-            frame = cv2.resize(
-                frame,
-                (max(1, int(width * scale)), max(1, int(height * scale))),
-                interpolation=cv2.INTER_AREA,
-            )
-        ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 68])
-        if not ok:
-            return None
-        return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+            return {}
+        for index, candidate in enumerate(candidates[:max(0, limit)]):
+            try:
+                midpoint = (float(candidate["start"]) + float(candidate["end"])) / 2
+                if midpoint < 0:
+                    continue
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+            capture.set(cv2.CAP_PROP_POS_MSEC, midpoint * 1000)
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                continue
+            height, width = frame.shape[:2]
+            scale = min(1.0, 512.0 / max(height, width))
+            if scale < 1.0:
+                frame = cv2.resize(
+                    frame,
+                    (max(1, int(width * scale)), max(1, int(height * scale))),
+                    interpolation=cv2.INTER_AREA,
+                )
+            ok, encoded = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 68])
+            if ok:
+                result[index] = "data:image/jpeg;base64," + base64.b64encode(
+                    encoded.tobytes()
+                ).decode("ascii")
     except Exception:
-        # Visual evidence is optional: keep the transcript/audio pipeline available.
-        return None
+        # Visual evidence is optional: keep transcript/audio ranking available.
+        return result
     finally:
         if capture is not None:
             capture.release()
+    return result
+
+
+def _candidate_frame_data_url(media_path: str, time_s: float) -> str | None:
+    """Compatibility helper for a single timestamp."""
+    frames = _candidate_frame_data_urls(
+        media_path, [{"start": time_s, "end": time_s}], limit=1
+    )
+    return frames.get(0)
 
 
 def _request_body(model: str, prompt: dict, frame_urls: dict[int, str] | None = None) -> bytes:
@@ -219,17 +241,8 @@ def score_candidates(
             "Treat it as partial visual context, not proof of an event over time."
         ),
     }
-    frame_urls = {}
-    if media_path:
-        # Cap image payload size and cost; text ranking still covers up to 80 candidates.
-        for index, candidate in enumerate(candidates[:12]):
-            try:
-                midpoint = (float(candidate["start"]) + float(candidate["end"])) / 2
-            except (KeyError, TypeError, ValueError, OverflowError):
-                continue
-            frame_url = _candidate_frame_data_url(media_path, midpoint)
-            if frame_url:
-                frame_urls[index] = frame_url
+    # Cap image payload size and reuse one decoder handle for all sampled frames.
+    frame_urls = _candidate_frame_data_urls(media_path, candidates, limit=12) if media_path else {}
 
     def make_request(with_frames: bool) -> Request:
         frames = frame_urls if with_frames else {}
