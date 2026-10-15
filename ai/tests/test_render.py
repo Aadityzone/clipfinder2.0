@@ -63,3 +63,41 @@ def test_render_multiple_segments_maps_optional_audio(tmp_path):
         command = call.args[0]
         assert "0:a?" in command
         assert "-map" in command
+
+def test_render_rejects_invalid_segment_ranges_before_ffmpeg(tmp_path):
+    import pytest
+
+    output = tmp_path / "clip.mp4"
+    with patch("ai.services.render.subprocess.run") as run:
+        with pytest.raises(ValueError, match="end must be after"):
+            render(
+                input_path=str(tmp_path / "source.mp4"),
+                output_path=str(output),
+                segments=[{"start": 5, "end": 5}],
+            )
+    run.assert_not_called()
+
+
+def test_render_rejects_non_finite_timestamps(tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError, match="must be finite"):
+        render(
+            input_path=str(tmp_path / "source.mp4"),
+            output_path=str(tmp_path / "clip.mp4"),
+            segments=[{"start": 0, "end": float("nan")}],
+        )
+
+
+def test_render_sanitizes_non_finite_focus_position(tmp_path):
+    output = tmp_path / "clip.mp4"
+    with patch("ai.services.render.subprocess.run") as run:
+        render(
+            input_path=str(tmp_path / "source.mp4"),
+            output_path=str(output),
+            start=0,
+            end=4,
+            focus_x=float("nan"),
+        )
+    vf = run.call_args.args[0][run.call_args.args[0].index("-vf") + 1]
+    assert "(iw-1080)*0.5" in vf
