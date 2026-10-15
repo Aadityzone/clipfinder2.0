@@ -199,7 +199,6 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
     result = score_candidates(result, transcript, b.instruction)
-    result = apply_genre_profile(result, transcript, b.genre)
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]
@@ -214,6 +213,8 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             }
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
+    # Genre profiles can now use speaker-turn and diarization features when available.
+    result = apply_genre_profile(result, transcript, b.genre)
     result = apply_creator_preferences(result, b.creator_preferences)
     # Revalidate after model/profile adjustments so the API never emits invalid scores.
     result = validate_candidates(result, media_duration)
