@@ -19,6 +19,7 @@ from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
 from .services.genre_intelligence import apply_genre_profile, VALID_GENRES
 from .services.candidate_contract import validate_candidates
+from .services.visual_candidates import multimodal_event_candidates
 import hmac
 import os
 import uuid
@@ -165,8 +166,19 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)
+    requested_categories = {str(category).strip().lower().replace("_", " ") for category in b.categories}
+    allow_visual_proposals = not requested_categories or bool(
+        requested_categories & {"ai detect", "general", "all"}
+    )
+    if allow_visual_proposals and media:
+        result.extend(multimodal_event_candidates(
+            b.segments, media, media_duration, max_candidates=40
+        ))
     result = enrich_semantics(result, b.instruction)
-    result = optimize_candidates(b.segments, result)
+    # Story-boundary optimization needs transcript anchors; visual proposals still
+    # remain valid when speech is absent, so don't drop them for an empty transcript.
+    if b.segments:
+        result = optimize_candidates(b.segments, result)
     # Enforce one genre-neutral contract before any downstream feature extraction.
     result = validate_candidates(result, media_duration)
     diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
