@@ -56,3 +56,11 @@ def test_analyze_forwards_explicit_genre_to_ranking(monkeypatch):
     assert observed["genre"] == "gaming"
     assert result["candidates"]
 
+def test_highlight_cues_do_not_match_inside_unrelated_words():
+    from ai.highlights import _contains_cue
+
+    assert not _contains_cue("the window is open", "win")
+    assert not _contains_cue("a useful skill for beginners", "kill")
+    assert _contains_cue("That was a huge win!", "win")
+    assert _contains_cue("I can't believe it", "can't believe")
+\n
