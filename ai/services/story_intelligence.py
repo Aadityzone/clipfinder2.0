@@ -16,9 +16,20 @@ PAYOFF = ("because", "therefore", "finally", "turns out", "realized", "won", "lo
 def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    low = re.sub(r"\\s+", " ", text.lower()).strip()
+    cue = re.sub(r"\\s+", " ", phrase.lower()).strip()
+    return bool(
+        cue
+        and re.search(
+            r"(?<![a-z0-9])" + re.escape(cue) + r"(?![a-z0-9])",
+            low,
+        )
+    )
+
+
 def _hit_score(text: str, phrases: tuple[str, ...]) -> float:
-    low = text.lower()
-    return min(1.0, sum(1 for p in phrases if p in low) / 3.0)
+    return min(1.0, sum(1 for phrase in phrases if _contains_phrase(text, phrase)) / 3.0)
 
 def analyze_story(text: str, duration: float, before_text: str = "", after_text: str = "") -> StorySignals:
     tokens = _tokens(text)
@@ -27,7 +38,7 @@ def analyze_story(text: str, duration: float, before_text: str = "", after_text:
     hook = min(1, _hit_score(text, HOOKS) * .65 + min(1, text.count("?") / 2) * .35)
     tension = _hit_score(text, TENSION)
     payoff = _hit_score(text, PAYOFF) * .75 + min(1, len(tokens) / 90) * .25
-    conversational = min(1, (text.count("?") + text.count("!") + text.count("you ") + text.count("I ")) / 8)
+    conversational = min(1, (text.count("?") + text.count("!") + sum(1 for token in tokens if token in {"you", "your", "i", "we", "us", "our"})) / 8)
     # Standalone completeness rewards enough context but penalizes excessively long clips.
     context = min(1, len(tokens) / 55)
     length_penalty = max(0, min(1, (duration - 75) / 120))
