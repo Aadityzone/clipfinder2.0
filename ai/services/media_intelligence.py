@@ -27,13 +27,20 @@ def audio_features(path: str) -> dict:
     }, windows
 
 def scene_features(path: str) -> dict:
+    """Detect scene changes on a bounded, downscaled 2-fps analysis stream."""
     if not os.path.isfile(path):
         return {}
-    p = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-i", path,
-         "-vf", "select='gt(scene,0.4)',showinfo", "-an", "-f", "null", "-"],
-        capture_output=True, text=True
-    )
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "info", "-i", path,
+             "-vf", "fps=2,scale=320:-2,select='gt(scene,0.4)',showinfo",
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if p.returncode != 0:
+        return {}
     times = [float(m.group(1)) for m in re.finditer(r"pts_time:([0-9.]+)", p.stderr)]
     return {"sceneChanges": times[:500], "sceneChangeCount": len(times)}
 
