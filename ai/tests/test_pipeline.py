@@ -40,7 +40,7 @@ def test_analyze_forwards_explicit_genre_to_ranking(monkeypatch):
     monkeypatch.setattr(main, "optimize_candidates", lambda _segments, rows: rows)
     monkeypatch.setattr(main, "enrich_semantics", lambda rows, _instruction: rows)
     monkeypatch.setattr(main, "deduplicate", lambda rows: rows)
-    monkeypatch.setattr(main, "score_candidates", lambda rows, _transcript, _instruction: rows)
+    monkeypatch.setattr(main, "score_candidates", lambda rows, _transcript, _instruction, **_kwargs: rows)
     def record_genre(rows, _transcript, genre):
         observed["genre"] = genre
         return rows
