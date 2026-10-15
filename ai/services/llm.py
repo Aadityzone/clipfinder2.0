@@ -22,6 +22,48 @@ def _response_text(data: dict) -> str:
     return "\n".join(chunks)
 
 
+def _ollama_response_text(data: dict) -> str:
+    message = data.get("message")
+    if isinstance(message, dict):
+        value = message.get("content")
+        if isinstance(value, str):
+            return value.strip()
+    return ""
+
+
+def _ollama_request_body(
+    model: str,
+    prompt: dict,
+    frame_urls: dict[int, str] | None = None,
+) -> bytes:
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Return JSON only: an array of objects with i, score (0-100), rationale. "
+                "Rank genuine clip-worthiness using transcript and any attached single-frame evidence. "
+                "A still image cannot prove motion, dialogue, or an outcome. Do not invent events."
+            ),
+        },
+        {"role": "user", "content": json.dumps(prompt)},
+    ]
+    for index, data_url in (frame_urls or {}).items():
+        if "," not in data_url:
+            continue
+        messages.append({
+            "role": "user",
+            "content": f"Visual evidence for candidate index {index}, sampled near its midpoint. This is only one frame.",
+            "images": [data_url.split(",", 1)[1]],
+        })
+    return json.dumps({
+        "model": model,
+        "stream": False,
+        "format": "json",
+        "messages": messages,
+        "options": {"temperature": 0.1},
+    }).encode()
+
+
 def _parse_rankings(raw: str) -> dict[int, dict]:
     """Parse model rankings defensively; ignore malformed and out-of-range indexes."""
     raw = raw.strip()
@@ -114,11 +156,17 @@ def score_candidates(
     instruction: str | None = None,
     media_path: str | None = None,
 ) -> list[dict]:
-    key = os.getenv("OPENAI_API_KEY")
-    if not key or not candidates:
+    if not candidates:
         return candidates
-    base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    ollama_base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
+    if not openai_key and not ollama_base:
+        return candidates
+
+    provider = "openai" if openai_key else "ollama"
+    base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/") if openai_key else ollama_base
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini") if openai_key else os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
     compact = [{
         "i": i,
         "start": c["start"],
@@ -143,8 +191,8 @@ def score_candidates(
         "transcript_context": transcript[:30000],
         "candidates": compact,
         "visual_evidence_note": (
-            "For a subset of candidates, a single sampled frame follows the JSON. "
-            "Treat it as partial visual context, not proof of what happened over time."
+            "Some candidates may have a single sampled frame attached. "
+            "Treat it as partial visual context, not proof of an event over time."
         ),
     }
     frame_urls = {}
@@ -159,28 +207,33 @@ def score_candidates(
             if frame_url:
                 frame_urls[index] = frame_url
 
-    req = Request(
-        base + "/responses",
-        data=_request_body(model, prompt, frame_urls),
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-    )
+    def make_request(with_frames: bool) -> Request:
+        frames = frame_urls if with_frames else {}
+        if provider == "ollama":
+            return Request(
+                base + "/api/chat",
+                data=_ollama_request_body(model, prompt, frames),
+                headers={"Content-Type": "application/json"},
+            )
+        return Request(
+            base + "/responses",
+            data=_request_body(model, prompt, frames),
+            headers={"Authorization": "Bearer " + openai_key, "Content-Type": "application/json"},
+        )
+
     try:
         try:
-            with urlopen(req, timeout=60) as resp:
+            with urlopen(make_request(bool(frame_urls)), timeout=90 if provider == "ollama" else 60) as resp:
                 data = json.loads(resp.read())
         except Exception:
-            # Some OpenAI-compatible providers do not accept image inputs. Retry
-            # text-only so optional vision support never disables basic LLM ranking.
+            # Providers without vision support can still rank transcript candidates.
             if not frame_urls:
                 raise
-            fallback = Request(
-                base + "/responses",
-                data=_request_body(model, prompt),
-                headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-            )
-            with urlopen(fallback, timeout=45) as resp:
+            with urlopen(make_request(False), timeout=90 if provider == "ollama" else 45) as resp:
                 data = json.loads(resp.read())
-        ranked = _parse_rankings(_response_text(data))
+
+        raw = _ollama_response_text(data) if provider == "ollama" else _response_text(data)
+        ranked = _parse_rankings(raw)
         for i, candidate in enumerate(candidates[:80]):
             item = ranked.get(i)
             if item:
@@ -190,9 +243,10 @@ def score_candidates(
                     candidate["rationale"] = item["rationale"]
                 features = candidate.setdefault("features", {})
                 features["llmScore"] = llm_score
+                features["llmProvider"] = provider
                 if i in frame_urls:
                     features["llmVisualEvidence"] = True
     except Exception:
-        # LLM scoring is an optional enhancement; deterministic ranking remains available.
+        # LLM is optional; deterministic ranking remains available if a provider is offline.
         pass
     return candidates
