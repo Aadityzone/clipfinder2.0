@@ -10,7 +10,7 @@ deduplication, or real-media evaluation.
 1. Validate and probe the source media.
 2. Extract audio, timestamped speech, sampled frames, scene changes, and optional
    on-screen text/action signals.
-3. Generate candidate intervals from available modalities.
+3. Generate transcript-centered candidates plus bounded event proposals from timestamped visual changes, motion, audio peaks, scene changes, and available on-screen action cues. Event proposals are evidence-backed but do not claim semantic understanding of the event.
 4. Enrich candidates with transcript, audio, visual, speaker, and provenance
    features when those signals are available.
 5. Validate candidate timestamps and finite scores against source duration.
@@ -20,7 +20,9 @@ deduplication, or real-media evaluation.
 
 A missing optional model must be reported as unavailable, not represented as a
 successful analysis. Visual-only candidates are allowed by the shared contract
-when they include inspectable feature evidence.
+when they include inspectable feature evidence. The event-proposal stage is an initial
+recall-oriented foundation; it is not yet a reliable classifier for clutch plays,
+fights, transformations, or other semantic events.
 
 ## Genre foundations and next specialization
 
