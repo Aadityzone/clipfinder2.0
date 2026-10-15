@@ -166,3 +166,31 @@ def test_bounded_analyze_shifts_candidates_back_to_source_timestamps(monkeypatch
 
     assert result["candidates"][0]["start"] == 31.0
     assert result["candidates"][0]["end"] == 35.0
+
+
+def test_highlight_cue_matching_normalizes_repeated_whitespace():
+    from ai.highlights import _contains_cue
+
+    assert _contains_cue("I cannot believe that happened", "cannot believe")
+    assert _contains_cue("I cannot\\tbelieve that happened", "cannot believe")
+
+
+def test_dedup_discards_invalid_intervals_and_non_finite_scores():
+    items = [
+        {"start": 0, "end": 10, "score": 90},
+        {"start": float("nan"), "end": 12, "score": 100},
+        {"start": 11, "end": 11, "score": 80},
+        {"start": 20, "end": 30, "score": float("nan")},
+        {"start": 40, "end": 50, "score": 60},
+    ]
+    result = deduplicate(items)
+    assert [(row["start"], row["end"]) for row in result] == [(0, 10), (20, 30), (40, 50)]
+    assert result[1]["score"] == 0.0
+
+
+def test_dedup_clamps_invalid_threshold_to_safe_range():
+    items = [
+        {"start": 0, "end": 10, "score": 90},
+        {"start": 1, "end": 9, "score": 80},
+    ]
+    assert len(deduplicate(items, threshold=float("nan"))) == 1
