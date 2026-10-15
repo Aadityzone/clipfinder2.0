@@ -198,7 +198,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         }
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
-    result = score_candidates(result, transcript, b.instruction)
+    result = score_candidates(result, transcript, b.instruction, media_path=b.media_path)
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]
