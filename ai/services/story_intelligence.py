@@ -15,9 +15,11 @@ TENSION = ("but", "however", "except", "until", "problem", "wrong", "failed", "c
 PAYOFF = ("because", "therefore", "finally", "turns out", "realized", "won", "lost", "actually", "so that's", "that's why")
 
 def _tokens(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9']+", text.lower())
+    return re.findall(r"[a-z0-9']+", text.lower()) if isinstance(text, str) else []
 
 def _contains_phrase(text: str, phrase: str) -> bool:
+    if not isinstance(text, str) or not isinstance(phrase, str):
+        return False
     low = re.sub(r"\s+", " ", text.lower()).strip()
     cue = re.sub(r"\s+", " ", phrase.lower()).strip()
     return bool(
@@ -33,16 +35,24 @@ def _hit_score(text: str, phrases: tuple[str, ...]) -> float:
     return min(1.0, sum(1 for phrase in phrases if _contains_phrase(text, phrase)) / 3.0)
 
 def analyze_story(text: str, duration: float, before_text: str = "", after_text: str = "") -> StorySignals:
+    if not isinstance(text, str):
+        return StorySignals(0, 0, 0, 0, 0)
     tokens = _tokens(text)
     if not tokens:
         return StorySignals(0, 0, 0, 0, 0)
+    try:
+        duration_value = float(duration)
+    except (TypeError, ValueError, OverflowError):
+        duration_value = 0.0
+    if not math.isfinite(duration_value) or duration_value < 0:
+        duration_value = 0.0
     hook = min(1, _hit_score(text, HOOKS) * .65 + min(1, text.count("?") / 2) * .35)
     tension = _hit_score(text, TENSION)
     payoff = _hit_score(text, PAYOFF) * .75 + min(1, len(tokens) / 90) * .25
     conversational = min(1, (text.count("?") + text.count("!") + sum(1 for token in tokens if token in {"you", "your", "i", "we", "us", "our"})) / 8)
     # Standalone completeness rewards enough context but penalizes excessively long clips.
     context = min(1, len(tokens) / 55)
-    length_penalty = max(0, min(1, (duration - 75) / 120))
+    length_penalty = max(0, min(1, (duration_value - 75) / 120))
     completeness = min(1, context * .65 + payoff * .25 + (1 - length_penalty) * .10)
     return StorySignals(hook, tension, payoff, completeness, conversational)
 

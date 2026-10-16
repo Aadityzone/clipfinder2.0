@@ -60,3 +60,16 @@ def test_story_optimizer_ignores_malformed_candidates_and_segments():
     )
     assert len(result) == 1
     assert isinstance(result[0]["features"]["story"], dict)
+
+
+def test_story_analysis_handles_invalid_text_and_duration():
+    assert story_score(analyze_story(None, 30)) == 0
+    assert story_score(analyze_story("Wait, what happened? We finally won!", "not-a-duration")) >= 0
+    assert story_score(analyze_story("Wait, what happened? We finally won!", float("nan"))) >= 0
+
+
+def test_phrase_matching_rejects_non_string_inputs():
+    from ai.services.story_intelligence import _contains_phrase
+
+    assert not _contains_phrase(None, "wait")
+    assert not _contains_phrase("wait", None)
