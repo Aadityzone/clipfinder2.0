@@ -26,11 +26,15 @@ export default function Editor({
   projectId: _projectId,
   mediaId,
   duration,
+  sourceOffset = 0,
+  sourceDuration = duration,
   clips,
 }: {
   projectId: string;
   mediaId: string | null;
   duration: number;
+  sourceOffset?: number;
+  sourceDuration?: number;
   clips: Clip[];
 }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -41,7 +45,7 @@ export default function Editor({
   );
   const [selectedSegment, setSelectedSegment] = useState(0);
   const [aspect, setAspect] = useState(clips[0]?.edit?.aspectRatio ?? "9:16");
-  const [time, setTime] = useState(0);
+  const [time, setTime] = useState(sourceOffset);
   const [playing, setPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rendering, setRendering] = useState(false);
@@ -97,14 +101,14 @@ export default function Editor({
     const v = video.current;
     if (!v) return;
     const onTime = () => {
-      const next = v.currentTime;
+      const next = v.currentTime + sourceOffset;
       setTime(next);
       const index = segments.findIndex((s) => next >= s.startS && next <= s.endS);
       if (index >= 0) setSelectedSegment(index);
     };
     v.addEventListener("timeupdate", onTime);
     return () => v.removeEventListener("timeupdate", onTime);
-  }, [segments]);
+  }, [segments, sourceOffset]);
 
   const push = (next: Segment[]) => {
     setHistory((h) => [...h, segments]);
@@ -113,8 +117,8 @@ export default function Editor({
   };
 
   const seek = (t: number) => {
-    const next = Math.max(0, Math.min(duration, t));
-    if (video.current) video.current.currentTime = next;
+    const next = Math.max(sourceOffset, Math.min(sourceOffset + duration, t));
+    if (video.current) video.current.currentTime = next - sourceOffset;
     setTime(next);
   };
 
@@ -296,7 +300,7 @@ export default function Editor({
     }
   };
 
-  const pct = (t: number) => (duration ? Math.min(100, Math.max(0, (t / duration) * 100)) : 0);
+  const pct = (t: number) => (duration ? Math.min(100, Math.max(0, ((t - sourceOffset) / duration) * 100)) : 0);
 
   return (
     <div className="grid min-h-[760px] grid-cols-[260px_1fr_300px] overflow-hidden rounded-3xl border border-white/10 bg-[#0d0f0b]">
@@ -340,6 +344,7 @@ export default function Editor({
               src={mediaId ? `/api/media/${mediaId}` : undefined}
               controls={false}
               className="h-full w-full object-contain"
+              onLoadedMetadata={() => { if (video.current) video.current.currentTime = Math.max(0, time - sourceOffset); }}
               onPlay={() => setPlaying(true)}
               onPause={() => setPlaying(false)}
               onClick={() => {
@@ -364,14 +369,14 @@ export default function Editor({
         <div className="border-t border-white/10 p-5">
           <div className="mb-3 flex items-center justify-between text-xs text-zinc-400">
             <span>{fmt(time)}</span>
-            <span>{fmt(duration)}</span>
+            <span>{fmt(sourceOffset + duration)}</span>
           </div>
 
           <div
             className="relative h-14 cursor-pointer rounded-xl bg-white/[.04]"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
-              seek(((e.clientX - r.left) / r.width) * duration);
+              seek(sourceOffset + ((e.clientX - r.left) / r.width) * duration);
             }}
           >
             {waveform.map((v, i) => <div key={i} className="absolute bottom-1 top-1 w-px bg-white/20" style={{ left: `${(i / Math.max(1, waveform.length - 1)) * 100}%`, transform: `scaleY(${Math.max(0.04, v)})`, transformOrigin: "center" }} />)}
@@ -393,6 +398,7 @@ export default function Editor({
             ))}
             <div className="absolute inset-y-0 w-0.5 bg-[#39ff14]" style={{ left: `${pct(time)}%` }} />
           </div>
+          <div className="mt-2 text-[10px] text-zinc-600">Source timestamps · selected media begins at {fmt(sourceOffset)} · full source {fmt(sourceDuration)}</div>
 
           <div className="mt-3 flex flex-wrap gap-2">
             <button onClick={trimIn} disabled={!current} className="tool disabled:opacity-30">Trim in</button>

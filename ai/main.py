@@ -4,7 +4,7 @@ from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe
 from .services.transcription_range import transcribe_range
 from .services.analysis_range import extract_analysis_range, shift_segments_to_range, validate_analysis_range
-from .services.download import download
+from .services.download import download, download_range, get_video_metadata
 from .services.media import ffprobe
 from .services.render import render
 from .highlights import candidates
@@ -13,6 +13,7 @@ from .services.media_intelligence import analyze_media
 from .services.dedup import deduplicate
 from .services.llm import score_candidates, ranking_capabilities
 from .services.semantic import enrich_semantics
+from .services.transcript_rag import enrich_candidates_with_context
 from .services.story_intelligence import optimize_candidates
 from .services.speaker_intelligence import speaker_signals
 from .services.diarization import diarize, diarization_status
@@ -35,6 +36,11 @@ app = FastAPI(title="Clip Finder AI", version="2.2.0")
 class IngestRequest(BaseModel):
     url: str
     output_dir: str
+    start_seconds: float | None = None
+    end_seconds: float | None = None
+
+class SourceMetadataRequest(BaseModel):
+    url: str
 
 class IngestResponse(BaseModel):
     media_path: str
@@ -114,11 +120,36 @@ def health():
 def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
-        path = download(b.url, os.path.join(b.output_dir, uuid.uuid4().hex))
+        has_start, has_end = b.start_seconds is not None, b.end_seconds is not None
+        if has_start != has_end:
+            raise ValueError("Both start_seconds and end_seconds are required for a selected source range.")
+        range_metadata = None
+        output_dir = os.path.join(b.output_dir, uuid.uuid4().hex)
+        if has_start:
+            source = get_video_metadata(b.url)
+            start, end = float(b.start_seconds), float(b.end_seconds)
+            if start < 0 or end <= start or end > source["duration"] + 0.05 or end - start > 3 * 60 * 60:
+                raise ValueError("Selected source range is outside the source duration or exceeds three hours.")
+            path = download_range(b.url, output_dir, start, min(end, source["duration"]))
+            range_metadata = {"sourceDuration": source["duration"], "sourceStartS": start, "sourceEndS": min(end, source["duration"])}
+        else:
+            path = download(b.url, output_dir)
         metadata = ffprobe(path)
         if not metadata.get("duration") or not metadata.get("width") or not metadata.get("height"):
             raise RuntimeError("Downloaded media has no valid video stream or duration.")
+        if range_metadata:
+            metadata.update(range_metadata)
         return {"media_path": path, "metadata": metadata}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@app.post("/v1/source-metadata")
+def source_metadata(b: SourceMetadataRequest, x_ai_secret: str | None = Header(default=None)):
+    auth(x_ai_secret)
+    try:
+        return get_video_metadata(b.url)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -230,6 +261,10 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             for candidate in local_result.get("candidates", []):
                 candidate["start"] = round(float(candidate["start"]) + range_start, 3)
                 candidate["end"] = round(float(candidate["end"]) + range_start, 3)
+                rag = candidate.get("features", {}).get("transcriptRag", {})
+                for context in rag.get("chunks", []):
+                    context["start"] = round(float(context["start"]) + range_start, 3)
+                    context["end"] = round(float(context["end"]) + range_start, 3)
             absolute_candidates = validate_candidates(local_result.get("candidates", []), source_duration)
             absolute_candidates = sorted(absolute_candidates, key=lambda item: float(item.get("score", 0)), reverse=True)
             return {"candidates": absolute_candidates[:50]}
@@ -274,7 +309,11 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         }
     result = deduplicate(result)
     transcript = " ".join(str(s.get("text", "")) for s in analysis_segments)
-    result = score_candidates(result, transcript, b.instruction, media_path=b.media_path, genre=b.genre)
+    result, rag_context = enrich_candidates_with_context(result, analysis_segments)
+    result = score_candidates(
+        result, transcript, b.instruction, media_path=b.media_path, genre=b.genre,
+        retrieved_context=rag_context,
+    )
     for candidate in result:
         related = [s for s in analysis_segments if float(s["end"]) > candidate["start"] and float(s["start"]) < candidate["end"]]
         labels = [s.get("speaker") for s in related if s.get("speaker")]

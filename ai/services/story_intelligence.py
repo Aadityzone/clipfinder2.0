@@ -135,10 +135,14 @@ def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, 
         maximum = max(75.0, minimum)
     anchor_position = max(0, min(anchor_position, len(segments) - 1))
     anchor = segments[anchor_position]
-    start = float(anchor["start"])
+    anchor_start = float(anchor["start"])
+    start = anchor_start
     end = float(anchor["end"])
     left, right = anchor_position - 1, anchor_position + 1
-    while left >= 0 and start - float(segments[left]["start"]) < 16:
+    # Compare prior rows to the anchor, not to the moving start. Comparing to
+    # the moving start walks through every contiguous transcript row and can
+    # move a candidate all the way to the beginning of a long video.
+    while left >= 0 and anchor_start - float(segments[left]["start"]) < 16:
         start = float(segments[left]["start"])
         left -= 1
     while right < len(segments):
@@ -151,7 +155,12 @@ def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, 
         end = min(start + minimum, float(segments[-1]["end"]))
     if end - start > maximum:
         end = start + maximum
+    bounded_start, bounded_end = start, end
     start, end = _punctuated_word_bounds(segments, start, end)
+    # Sentence snapping is best-effort. Do not let it undo the clip duration
+    # limit established above.
+    if end - start > maximum:
+        start, end = bounded_start, bounded_end
     if end - start < minimum:
         end = min(float(segments[-1]["end"]), start + minimum)
     return max(0.0, start), max(start, end)

@@ -19,6 +19,35 @@ def test_boundaries_include_context():
     assert start <= 4
     assert end >= 18
 
+
+def test_boundaries_keep_anchor_when_transcript_rows_are_contiguous():
+    # Consecutive rows used to make the moving-start check keep walking left
+    # until the start of the video, yielding a clip that missed the anchor.
+    segments = [
+        {"start": float(index * 4), "end": float(index * 4 + 4), "text": f"Segment {index}."}
+        for index in range(50)
+    ]
+
+    start, end = find_boundaries(segments, 25)
+
+    assert start >= 84
+    assert start <= 100 < end
+    assert start > 60
+    assert 0 < end - start <= 75
+
+
+def test_sentence_snapping_does_not_exceed_maximum_duration():
+    segments = [
+        {"start": float(index * 5), "end": float(index * 5 + 5), "text": f"Segment {index}."}
+        for index in range(50)
+    ]
+    segments[16]["words"] = [{"start": 82, "end": 82.5, "word": "setup."}]
+
+    start, end = find_boundaries(segments, 20)
+
+    assert start == 85
+    assert end - start <= 75
+
 def test_story_cues_do_not_match_inside_unrelated_words():
     signals = analyze_story("The sofa is beside the sofa, and the software is stable.", 20)
     assert signals.hook == 0

@@ -62,6 +62,7 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 - No representative human-labelled benchmark results have been established. Do not invent accuracy/precision numbers.
 - The full real-video path from a public source through persisted candidates and a playable export has not yet been confirmed end-to-end in the available handoff.
 - Provider-dependent features require real credentials/configuration. Never request or commit secrets.
+- Transcript RAG (added on the active feature branch) is request-local and uses the existing sentence-transformers dependency with CPU inference and local-cache-only model loading. It does not persist transcript embeddings or require a vector database. If the model is not installed in the local Hugging Face cache, it reports unavailable and leaves deterministic ranking intact. RAG has not been evaluated against human-labeled clip relevance data.
 - Passing unit tests or a Next.js build does not prove real-media acceptance.
 
 ## Current next priorities
@@ -108,3 +109,21 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 - Workflow inputs and outputs: `.github/workflows/ai-real-video-smoke.yml` is manual (`workflow_dispatch`). It requires `source_url`, genre, and top count (choices 1/2/3/5/10); language is optional. It runs Ubuntu with Python 3.12, FFmpeg/FFprobe, `ai/requirements-ci.txt`, and Faster Whisper small/CPU/int8, with a 120-minute timeout. It uploads `artifacts/ai-smoke/` as `clipfinder-real-video-smoke` for 7 days, including `transcript.json`, `report.json`, and any rendered clips.
 - No local video fixture was found in the repository file inventory, and no rights-authorized public URL was provided. Therefore no real-media run was attempted. Real output playability and timestamps from actual model-generated candidates remain unverified. The smoke runner rejects invalid/empty candidate intervals by skipping intervals where clipped end is not after start, and probes rendered outputs; regression tests cover these guards only with mocks.
 - To run the real-media integration path, provide one rights-authorized source video, either a supported public URL or a local video file.
+
+## Transcript retrieval augmentation
+
+- `ai/services/transcript_rag.py` creates overlapping word-window transcript chunks with source timestamps and retrieves request-local semantic context for up to 20 candidates. The request boundary is the privacy boundary: only the segments already supplied to one authorized analysis call are considered, so there is no cross-user/project shared index.
+- RAG is controlled with `RAG_ENABLED` (defaults to enabled). `RAG_ENABLED=false` disables retrieval. `RAG_EMBEDDING_MODEL` selects the sentence-transformers model; it must already be cached locally. Loading is CPU-only and `local_files_only`; missing dependencies/cache, malformed embeddings, or retrieval errors are diagnostics and do not fail analysis.
+- Chunk defaults are 110 words with 20 words of overlap (`RAG_CHUNK_WORDS`, `RAG_CHUNK_OVERLAP_WORDS`). Embeddings are batched by 32 (`RAG_EMBEDDING_BATCH_SIZE`) and normalized, with a process-local LRU capped at 4,096 vectors and an estimated 32 MiB. Retrieval returns at most three chunks (`RAG_RETRIEVAL_LIMIT`) and 600 characters (`RAG_CONTEXT_MAX_CHARS`) per candidate; candidate retrieval is capped at 20 per analysis. The optional existing LLM scorer receives those chunks as transcript evidence in its existing call. RAG adds no LLM calls and does not change deterministic candidate scores.
+- Candidate and retrieved context timestamps are in source-media coordinates. Bounded analysis already clips the supplied transcript to the selected range; the range wrapper shifts retrieved context timestamps back to source coordinates.
+- Unit tests use deterministic test-only embeddings. There is no human-labeled RAG quality benchmark or real-video RAG integration result yet, and RAG cannot establish visual evidence from transcripts.
+- Repeatable technical harness: `python ai/scripts/benchmark_transcript_rag.py --test-embeddings` reports candidate/context counts, latency, extra LLM calls, and baseline versus no-LLM ranking. It is synthetic and does not measure clip quality. Omit the flag to exercise an already-cached local model.
+- Focused test command: `python -m pytest -q -p no:cacheprovider ai/tests/test_transcript_rag.py ai/tests/test_llm_scoring.py`.
+
+## Core boundary correctness fix (2026-10-16)
+
+- On the shared worktree (`feature/premium-black-green-ui`, HEAD `2c71410`), reviewing `ai/services/story_intelligence.py` exposed a setup-window loop bug: with continuous four-second transcript rows and an anchor at 100 seconds, `find_boundaries` returned `(0, 75)`, dropping the event anchor.
+- The left-context loop now measures each prior segment against the fixed anchor timestamp. Sentence-boundary snapping also falls back to the already bounded interval if snapping would exceed the configured maximum duration.
+- Regression coverage in `ai/tests/test_story_intelligence.py` checks anchor inclusion on a long continuous transcript and verifies punctuation snapping respects the 75-second cap.
+- Verification on the complete shared worktree, including the visible RAG and time-range changes: `python -m pytest -q -p no:cacheprovider ai/tests` — **181 passed**, one `StarletteDeprecationWarning`, 1.33 seconds. Pytest was run outside the sandbox because its temporary-directory fixture is blocked inside it.
+- No real media was processed. The boundary change is verified against deterministic transcript fixtures; real-video candidate quality remains unmeasured.

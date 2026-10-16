@@ -2,34 +2,35 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type JobState = { status: string; progress: number; error?: string | null };
+type JobState = { id: string; status: string; progress: number; error?: string | null };
 const stages = [
-  { key: "DOWNLOADING", title: "Getting your video", detail: "Fetching the source and checking that it can be processed.", icon: "↓" },
-  { key: "INGESTING", title: "Preparing the media", detail: "Reading video details and preparing audio/video for analysis.", icon: "◫" },
-  { key: "TRANSCRIBING", title: "Listening & transcribing", detail: "Turning spoken words into timestamped transcript segments.", icon: "≋" },
-  { key: "ANALYZING", title: "Finding the moments", detail: "Examining transcript, audio and visual signals for potential highlights.", icon: "✳" },
+  { key: "DOWNLOADING", title: "Retrieving the selected segment", detail: "Fetching the confirmed time range from the source provider.", icon: "↓" },
+  { key: "INGESTING", title: "Preparing the selected segment", detail: "Rechecking source duration and validating the confirmed range.", icon: "◫" },
+  { key: "TRANSCRIBING", title: "Transcribing the selected range", detail: "Creating timestamped transcript chunks within the selected interval.", icon: "≋" },
+  { key: "ANALYZING", title: "Finding moments in the range", detail: "Examining only the selected interval for potential highlights.", icon: "✳" },
   { key: "EDITING", title: "Scoring the clips", detail: "Ranking candidate moments and removing overlapping duplicates.", icon: "⌁" },
   { key: "RENDERING", title: "Finishing the output", detail: "Rendering the requested media output.", icon: "▣" },
 ];
 const statusStage: Record<string, number> = { QUEUED: -1, RETRYING: -1, DOWNLOADING: 0, INGESTING: 1, TRANSCRIBING: 2, ANALYZING: 3, EDITING: 4, RENDERING: 5, READY: 6, FAILED: 0, CANCELLED: 0 };
 
-export default function ProcessingJourney({ jobId, initialStatus, initialProgress }: { jobId: string; initialStatus: string; initialProgress: number }) {
-  const [job, setJob] = useState<JobState>({ status: initialStatus, progress: initialProgress ?? 0 });
+export default function ProcessingJourney({ projectId, jobId, initialStatus, initialProgress }: { projectId: string; jobId: string; initialStatus: string; initialProgress: number }) {
+  const [job, setJob] = useState<JobState>({ id: jobId, status: initialStatus, progress: initialProgress ?? 0 });
   const [lastUpdate, setLastUpdate] = useState(0);
   useEffect(() => {
     let stopped = false;
     const refresh = async () => {
       try {
-        const response = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" });
+        const response = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
         if (!response.ok) return;
         const data = await response.json();
-        if (!stopped) { setJob({ status: data.status, progress: Number(data.progress ?? 0), error: data.error ?? null }); setLastUpdate(Date.now()); }
+        const latest = Array.isArray(data.jobs) ? data.jobs[0] : null;
+        if (!stopped && latest) { setJob({ id: latest.id, status: latest.status, progress: Number(latest.progress ?? 0), error: latest.error ?? null }); setLastUpdate(Date.now()); }
       } catch { /* Keep the last confirmed state if a poll fails. */ }
     };
     void refresh();
     const timer = window.setInterval(refresh, 2500);
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [jobId]);
+  }, [projectId, jobId]);
   const activeIndex = statusStage[job.status] ?? -1;
   const progress = Math.max(0, Math.min(100, job.progress <= 1 ? job.progress * 100 : job.progress));
   const terminal = ["READY", "FAILED", "CANCELLED"].includes(job.status);

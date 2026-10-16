@@ -203,6 +203,27 @@ def test_selected_genre_is_sent_to_the_model_prompt(monkeypatch):
     prompt = json.loads(observed["body"]["input"][1]["content"][0]["text"])
     assert prompt["genre"] == "anime"
 
+
+def test_retrieved_transcript_context_is_added_to_existing_call(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    observed = {"calls": 0}
+
+    def fake_urlopen(request, **_kwargs):
+        observed["calls"] += 1
+        body = json.loads(request.data)
+        observed["prompt"] = json.loads(body["input"][1]["content"][0]["text"])
+        return _FakeResponse({"output_text": json.dumps([{"i": 0, "score": 77, "rationale": "Setup and payoff"}])})
+
+    monkeypatch.setattr(llm, "urlopen", fake_urlopen)
+    items = [{"start": 10, "end": 18, "score": 55, "text": "It finally worked", "features": {}}]
+    context = {0: [{"start": 2.0, "end": 8.0, "text": "Earlier setup explains the payoff"}]}
+
+    result = llm.score_candidates(items, "It finally worked", retrieved_context=context)
+
+    assert observed["calls"] == 1
+    assert observed["prompt"]["candidates"][0]["retrieved_transcript_context"] == context[0]
+    assert result[0]["score"] == 64.9
+
 def test_openai_failure_falls_back_to_configured_ollama(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
