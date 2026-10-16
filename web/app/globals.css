@@ -40,8 +40,17 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .cf-sidebar-link[aria-current="page"] { box-shadow:inset 2px 0 var(--accent); }
 .cf-enter { animation:cf-enter .5s cubic-bezier(.2,.7,.2,1) both; }
 @keyframes cf-enter { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+.cf-headline-line { display:block; opacity:0; animation:cf-headline-rise .56s cubic-bezier(.2,.75,.25,1) forwards; }
+.cf-headline-line:nth-child(2) { animation-delay:90ms; }
+.cf-headline-line:nth-child(3) { animation-delay:180ms; }
+@keyframes cf-headline-rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+.cf-headline-accent { position:relative; isolation:isolate; width:fit-content; color:var(--accent); }
+.cf-headline-accent::before { content:""; position:absolute; z-index:-1; inset:-.2em -.55em; border-radius:50%; background:radial-gradient(ellipse at 50% 70%,rgba(57,255,20,.19),transparent 68%); filter:blur(13px); pointer-events:none; }
+.cf-headline-accent::after { content:""; position:absolute; inset:0; background:linear-gradient(108deg,transparent 28%,rgba(196,255,182,.2) 48%,transparent 68%); transform:translateX(-120%); animation:cf-headline-sweep 1.05s ease-out 420ms both; pointer-events:none; }
+@keyframes cf-headline-sweep { to { transform:translateX(120%); } }
+.cf-mascot-glow { background:radial-gradient(ellipse at center,rgba(57,255,20,.16),rgba(32,201,107,.08) 38%,transparent 72%); filter:blur(16px); }
 .cf-mascot-float { animation:cf-mascot-float 6.5s ease-in-out infinite; }
 @keyframes cf-mascot-float { 0%,100% { transform:translate3d(0,0,0) rotate(1deg); } 50% { transform:translate3d(0,-7px,0) rotate(-1.5deg); } }
 .cf-preview-scene { background-color:#121713; }
 .cf-preview-light { background:radial-gradient(ellipse at 70% 24%,rgba(32,201,107,.17),transparent 34%),radial-gradient(ellipse at 30% 74%,rgba(57,255,20,.08),transparent 45%),linear-gradient(145deg,#202820,#111612 58%,#1c241d); }
-@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } .cf-headline-line { opacity:1; transform:none; } }

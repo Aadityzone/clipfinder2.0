@@ -1,12 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
 
-const moments = [
-  { number: "01", title: "The unexpected comeback", range: "00:18:24 — 00:19:02", score: "96", width: "94%" },
-  { number: "02", title: "The reaction says it all", range: "00:42:10 — 00:42:38", score: "91", width: "86%" },
-  { number: "03", title: "Chat did not see this coming", range: "01:06:51 — 01:07:22", score: "87", width: "78%" },
-];
-
 function Brand() {
   return <Link href="/" className="inline-flex items-center gap-2.5 font-semibold tracking-tight" aria-label="Clip Finder home"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-[#39ff14] text-[#081008]"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M7 5.5v13l11-6.5L7 5.5Z" fill="currentColor"/><path d="M3.5 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span><span>clip<span className="text-[#39ff14]">finder</span><span className="ml-1 text-[10px] font-medium text-zinc-500">2.0</span></span></Link>;
 }
@@ -21,11 +15,11 @@ export default function HomePage() {
       <div className="flex items-center gap-2.5"><Link href="/login" className="hidden rounded-xl px-4 py-2.5 text-sm text-[#a0aaa1] transition hover:text-white sm:inline-flex">Sign in</Link><Link href="/signup" className="cf-button !min-h-10 !rounded-[10px] !px-4 text-xs sm:text-sm">Create account <span aria-hidden="true">↗</span></Link></div>
     </header>
 
-    <section className="relative z-10 mx-auto grid max-w-[1280px] items-center gap-10 px-5 pb-20 pt-12 md:px-9 md:pb-28 md:pt-20 lg:grid-cols-[.94fr_1.06fr] lg:gap-8">
-      <div className="cf-enter relative z-10">
+    <section className="relative z-10 mx-auto grid max-w-[1280px] items-center gap-12 px-5 pb-20 pt-10 md:px-9 md:pb-28 md:pt-16 lg:grid-cols-[.94fr_1.06fr] lg:gap-10 lg:pt-12">
+      <div className="cf-enter cf-hero-copy relative z-10">
         <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-[#39ff14]/20 bg-[#39ff14]/[.06] px-3.5 py-2 text-xs text-[#b2ff9b]"><span className="h-1.5 w-1.5 rounded-full bg-[#39ff14] shadow-[0_0_12px_#39ff14]" /> AI-assisted clip discovery</div>
-        <h1 className="max-w-[700px] text-[clamp(3.2rem,7vw,6.35rem)] font-semibold leading-[.94] tracking-[-.075em]">Turn long videos into <span className="text-[#39ff14]">viral clips.</span></h1>
-        <p className="mt-6 max-w-[560px] text-base leading-7 text-[#a0aaa1] md:text-lg md:leading-8">Drop a YouTube or Twitch link. Let AI find the best moments, then refine and export clips ready for Shorts, Reels, and TikTok.</p>
+        <h1 className="cf-hero-headline relative mt-1 max-w-[620px] text-[clamp(2.7rem,5.7vw,4.75rem)] font-semibold leading-[.99] tracking-[-.06em]"><span className="cf-headline-line">Turn long videos</span><span className="cf-headline-line">into</span><span className="cf-headline-line cf-headline-accent">viral clips.</span></h1>
+        <p className="mt-6 max-w-[500px] text-base leading-7 text-[#a0aaa1] md:text-[17px] md:leading-8">Drop a YouTube or Twitch link. Let AI find the best moments, then refine and export clips ready for Shorts, Reels, and TikTok.</p>
 
         <form action="/project/new" method="get" className="cf-card mt-8 max-w-[610px] rounded-2xl p-2.5 shadow-[0_24px_70px_rgba(0,0,0,.38)] sm:flex sm:items-center sm:gap-2">
           <label className="sr-only" htmlFor="hero-source-url">YouTube or Twitch video URL</label>
@@ -36,20 +30,21 @@ export default function HomePage() {
         <div className="mt-7"><Link href="/dashboard" className="inline-flex items-center gap-2 text-sm text-[#a0aaa1] transition hover:text-white">Explore the workspace <span className="text-[#39ff14]" aria-hidden="true">→</span></Link></div>
       </div>
 
-      <div className="cf-enter relative mx-auto w-full max-w-[650px] lg:ml-auto" style={{ animationDelay: "90ms" }}>
-        <div className="absolute -inset-10 rounded-[40px] bg-[#39ff14]/[.045] blur-3xl" aria-hidden="true" />
+      <div className="cf-enter relative mx-auto w-full max-w-[650px] lg:ml-auto lg:mt-32" style={{ animationDelay: "90ms" }}>
+        <div className="cf-mascot-glow pointer-events-none absolute -right-3 top-0 z-0 h-28 w-28 rounded-full lg:-top-[136px]" aria-hidden="true" />
+        <div className="cf-mascot-float relative z-10 mb-3 ml-auto mr-5 h-[112px] w-[112px] sm:h-[128px] sm:w-[128px] lg:absolute lg:-right-1 lg:-top-[136px] lg:z-20 lg:mb-0 lg:mr-0">
+          <Image src="/images/luffy-mascot.gif" alt="Luffy mascot" fill sizes="(max-width: 1023px) 112px, 128px" unoptimized className="object-contain drop-shadow-[0_9px_24px_rgba(57,255,20,.17)]" priority />
+        </div>
         <div className="cf-card relative overflow-hidden rounded-[25px] border-white/[.09] bg-[#0d110e]/95 p-3.5 shadow-[0_35px_100px_rgba(0,0,0,.55)] sm:p-5">
-          <div className="flex items-center justify-between border-b border-white/[.07] pb-4"><div><div className="text-sm font-semibold">Moment overview</div><div className="mt-1 text-xs text-[#768078]">Creator session · 01:42:18</div></div><span className="rounded-full border border-[#20c96b]/20 bg-[#20c96b]/[.08] px-2.5 py-1 text-[10px] font-semibold tracking-wide text-[#6ee59c]">ANALYSIS READY</span></div>
+          <div className="flex items-center justify-between gap-3 border-b border-white/[.07] pb-4"><div><div className="text-[10px] font-semibold tracking-[.16em] text-[#39ff14]">EDITOR WORKSPACE</div><div className="mt-1.5 text-sm font-semibold">Find moments. Shape every cut.</div></div><span className="shrink-0 rounded-full border border-white/[.09] bg-white/[.025] px-2.5 py-1 text-[10px] text-[#a0aaa1]">Preview only</span></div>
           <div className="cf-preview-scene relative mt-4 flex h-[190px] items-center justify-center overflow-hidden rounded-2xl border border-white/[.07] sm:h-[250px]">
             <div className="absolute inset-0 cf-preview-light" aria-hidden="true" />
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_45%,rgba(0,0,0,.66))]" aria-hidden="true" />
-            <div className="relative grid h-14 w-14 place-items-center rounded-full border border-white/25 bg-black/30 shadow-xl backdrop-blur"><svg viewBox="0 0 24 24" width="21" height="21" fill="white" aria-hidden="true"><path d="M8 5.5v13L18 12 8 5.5Z"/></svg></div>
-            <span className="absolute bottom-3.5 left-4 text-[10px] font-medium tracking-[.14em] text-white/75">SOURCE PREVIEW · ILLUSTRATIVE</span><span className="absolute bottom-3.5 right-4 rounded-md bg-black/50 px-2 py-1 font-mono text-[11px] text-white/80">01:42:18</span>
-            <div className="cf-mascot-float absolute -right-2 -top-4 z-[1] h-[128px] w-[128px] sm:-right-3 sm:-top-5 sm:h-[166px] sm:w-[166px]"><Image src="/images/luffy-mascot.gif" alt="Luffy cheering beside your clip preview" fill sizes="(max-width: 640px) 128px, 166px" unoptimized className="object-contain drop-shadow-[0_9px_24px_rgba(57,255,20,.17)]" priority /></div>
+            <div className="relative flex flex-col items-center px-5 text-center"><div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/[.12] bg-black/20 text-[#8f9b90]"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor"/></svg></div><p className="mt-3 text-sm font-medium text-[#e4e9e4]">Your video preview</p><p className="mt-1 text-xs text-[#879187]">Add a supported source to begin</p></div>
+            <span className="absolute bottom-3.5 left-4 text-[10px] font-medium tracking-[.14em] text-white/60">EMPTY WORKSPACE PREVIEW</span>
           </div>
-          <div className="mt-4 flex items-end justify-between gap-3"><div><div className="text-[10px] font-semibold tracking-[.16em] text-[#768078]">TOP MOMENTS</div><div className="mt-1 text-sm font-semibold">3 clips worth reviewing</div></div><span className="text-right text-[11px] text-[#768078]">Ranked by AI score</span></div>
-          <div className="mt-3 space-y-2">{moments.map(moment => <div key={moment.number} className="flex items-center gap-3 rounded-xl border border-white/[.055] bg-white/[.025] p-3"><span className="font-mono text-[11px] text-[#606b61]">{moment.number}</span><div className="min-w-0 flex-1"><div className="truncate text-xs font-medium text-[#e5eae5]">{moment.title}</div><div className="mt-1 font-mono text-[10px] text-[#768078]">{moment.range}</div><div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[.07]"><div className="h-full rounded-full bg-[#39ff14]" style={{ width: moment.width }} /></div></div><div className="text-right"><div className="text-sm font-semibold text-[#39ff14]">{moment.score}</div><div className="text-[9px] tracking-wide text-[#606b61]">SCORE</div></div></div>)}</div>
-          <div className="mt-4 flex items-center justify-between border-t border-white/[.07] pt-3.5"><span className="text-[10px] text-[#69756b]">Illustrative product preview</span><span className="flex items-center gap-1.5 text-[10px] text-[#a0aaa1]"><span className="h-1.5 w-1.5 rounded-full bg-[#20c96b]"/> Built for real workflows</span></div>
+          <div className="mt-4 flex items-center justify-between gap-3"><div><div className="text-[10px] font-semibold tracking-[.16em] text-[#768078]">TIMELINE</div><div className="mt-1 text-xs text-[#a0aaa1]">Trim and arrange your clips</div></div><span className="text-[10px] text-[#768078]">No source loaded</span></div>
+          <div className="cf-empty-timeline mt-3 space-y-2 rounded-xl border border-white/[.06] bg-black/15 p-3" aria-hidden="true"><div className="flex h-7 items-center gap-2 rounded-md border border-white/[.06] bg-white/[.015] px-2"><span className="h-1.5 w-1.5 rounded-full bg-[#20c96b]/50"/><span className="h-px flex-1 bg-white/[.07]"/></div><div className="flex h-7 items-center gap-2 rounded-md border border-white/[.06] bg-white/[.015] px-2"><span className="h-1.5 w-1.5 rounded-full bg-[#39ff14]/40"/><span className="h-px w-2/3 bg-white/[.07]"/></div></div>
+          <div className="mt-3 border-t border-white/[.07] pt-3 text-[10px] text-[#768078]">Illustrative workspace · no project or analysis data</div>
         </div>
       </div>
     </section>
