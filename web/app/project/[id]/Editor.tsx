@@ -307,7 +307,7 @@ export default function Editor({
             key={c.id}
             onClick={() => selectClip(c)}
             className={`mb-2 w-full rounded-xl border p-3 text-left ${
-              selected?.id === c.id ? "border-lime-300/60 bg-lime-300/10" : "border-white/10 bg-white/[.02]"
+              selected?.id === c.id ? "border-[#39ff14]/60 bg-[#39ff14]/10" : "border-white/10 bg-white/[.02]"
             }`}
           >
             <div className="flex justify-between">
@@ -385,13 +385,13 @@ export default function Editor({
                   seek(s.startS);
                 }}
                 className={`absolute inset-y-2 rounded-lg border ${
-                  i === selectedSegment ? "border-lime-300/80 bg-lime-300/20" : "border-white/10 bg-white/10"
+                  i === selectedSegment ? "border-[#39ff14]/80 bg-[#39ff14]/20" : "border-white/10 bg-white/10"
                 }`}
                 style={{ left: `${pct(s.startS)}%`, width: `${Math.max(0.5, pct(s.endS) - pct(s.startS))}%` }}
                 aria-label={`Select segment ${i + 1}`}
               />
             ))}
-            <div className="absolute inset-y-0 w-0.5 bg-lime-300" style={{ left: `${pct(time)}%` }} />
+            <div className="absolute inset-y-0 w-0.5 bg-[#39ff14]" style={{ left: `${pct(time)}%` }} />
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -418,7 +418,7 @@ export default function Editor({
                 key={a}
                 onClick={() => setAspect(a)}
                 className={`rounded-xl border py-3 text-xs ${
-                  aspect === a ? "border-lime-300 bg-lime-300/10 text-lime-200" : "border-white/10"
+                  aspect === a ? "border-[#39ff14] bg-[#39ff14]/10 text-[#b2ff9b]" : "border-white/10"
                 }`}
               >
                 {a}
@@ -450,7 +450,7 @@ export default function Editor({
                 seek(s.startS);
               }}
               className={`mt-2 w-full rounded-xl p-3 text-left text-xs ${
-                i === selectedSegment ? "bg-lime-300/10 ring-1 ring-lime-300/30" : "bg-white/[.04]"
+                i === selectedSegment ? "bg-[#39ff14]/10 ring-1 ring-[#39ff14]/30" : "bg-white/[.04]"
               }`}
             >
               {i + 1}. {fmt(s.startS)} → {fmt(s.endS)}
@@ -461,7 +461,7 @@ export default function Editor({
         <div className="mt-8 rounded-2xl border border-white/10 bg-white/[.03] p-4">
           <div className="text-sm font-medium">Approval</div>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={() => decide("accept")} className="rounded-xl border border-lime-300/30 px-3 py-2 text-xs">Approve</button>
+            <button onClick={() => decide("accept")} className="rounded-xl border border-[#39ff14]/30 px-3 py-2 text-xs">Approve</button>
             <button onClick={() => decide("reject")} className="rounded-xl border border-red-300/20 px-3 py-2 text-xs">Reject</button>
           </div>
         </div>
@@ -474,7 +474,7 @@ export default function Editor({
           <button
             disabled={!selected || saving || rendering}
             onClick={render}
-            className="mt-4 w-full rounded-xl bg-lime-300 px-4 py-3 text-sm font-semibold text-black disabled:opacity-40"
+            className="mt-4 w-full rounded-xl bg-[#39ff14] px-4 py-3 text-sm font-semibold text-black disabled:opacity-40"
           >
             {rendering ? "Queueing…" : "Render clip"}
           </button>

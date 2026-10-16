@@ -39,20 +39,20 @@ export default function ProcessingJourney({ jobId, initialStatus, initialProgres
   return (
     <section className="cf-processing mt-6 overflow-hidden rounded-3xl border border-white/[.09] bg-[#0d1015]">
       <div className="relative border-b border-white/[.07] px-5 py-5 sm:px-7">
-        <div className="cf-processing-orbit pointer-events-none absolute right-8 top-1/2 hidden h-24 w-24 -translate-y-1/2 rounded-full border border-lime-300/20 sm:block"><span className="cf-processing-dot absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-lime-300 shadow-[0_0_18px_rgba(196,243,107,.85)]"/><span className="absolute inset-3 rounded-full border border-sky-300/20"/><span className="absolute inset-[30px] rounded-full bg-lime-300/10"/></div>
-        <div className="text-[10px] font-bold uppercase tracking-[.22em] text-lime-300">Live processing journey</div>
+        <div className="cf-processing-orbit pointer-events-none absolute right-8 top-1/2 hidden h-24 w-24 -translate-y-1/2 rounded-full border border-[#39ff14]/20 sm:block"><span className="cf-processing-dot absolute left-1/2 top-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#39ff14] shadow-[0_0_18px_rgba(57,255,20,.85)]"/><span className="absolute inset-3 rounded-full border border-[#20c96b]/20"/><span className="absolute inset-[30px] rounded-full bg-[#39ff14]/10"/></div>
+        <div className="text-[10px] font-bold uppercase tracking-[.22em] text-[#39ff14]">Live processing journey</div>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-3 sm:pr-28"><div><h2 className="text-xl font-semibold tracking-tight text-white">{headline}</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-400">{description}</p></div><div className="rounded-xl border border-white/[.08] bg-white/[.03] px-3 py-2"><div className="text-[10px] text-zinc-500">Backend progress</div><div className="mt-0.5 text-lg font-semibold tabular-nums text-white">{Math.round(progress)}%</div></div></div>
-        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/[.07]"><div className={`h-full rounded-full bg-gradient-to-r from-lime-300 to-sky-300 transition-[width] duration-700 ${!terminal && job.status !== "QUEUED" ? "cf-processing-bar" : ""}`} style={{ width: `${job.status === "READY" ? 100 : progress}%` }}/></div>
+        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-white/[.07]"><div className={`h-full rounded-full bg-gradient-to-r from-[#39ff14] to-[#20c96b] transition-[width] duration-700 ${!terminal && job.status !== "QUEUED" ? "cf-processing-bar" : ""}`} style={{ width: `${job.status === "READY" ? 100 : progress}%` }}/></div>
         <div className="mt-2 flex justify-between text-[10px] text-zinc-600"><span>{job.status.replaceAll("_", " ")}</span><span>Last confirmed update · {elapsed}</span></div>
       </div>
       <div className="grid gap-2 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-3">
         {stages.map((stage, index) => {
           const complete = activeIndex > index || job.status === "READY";
           const current = activeIndex === index && !terminal;
-          return <div key={stage.key} className={`relative rounded-2xl border p-4 transition-colors duration-300 ${complete ? "border-lime-300/20 bg-lime-300/[.045]" : current ? "cf-processing-active border-sky-300/35 bg-sky-300/[.055]" : "border-white/[.06] bg-white/[.015]"}`}>
-            <div className="flex items-center gap-3"><div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-lg ${complete ? "border-lime-300/25 bg-lime-300/10 text-lime-200" : current ? "border-sky-300/30 bg-sky-300/10 text-sky-200" : "border-white/10 bg-white/[.025] text-zinc-500"}`}>{complete ? "✓" : stage.icon}</div><div className="min-w-0"><div className="text-[10px] uppercase tracking-[.15em] text-zinc-600">Step {index + 1}</div><div className={`mt-0.5 text-sm font-medium ${complete ? "text-lime-100" : current ? "text-white" : "text-zinc-400"}`}>{stage.title}</div></div></div>
+          return <div key={stage.key} className={`relative rounded-2xl border p-4 transition-colors duration-300 ${complete ? "border-[#39ff14]/20 bg-[#39ff14]/[.045]" : current ? "cf-processing-active border-[#20c96b]/35 bg-[#20c96b]/[.055]" : "border-white/[.06] bg-white/[.015]"}`}>
+            <div className="flex items-center gap-3"><div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-lg ${complete ? "border-[#39ff14]/25 bg-[#39ff14]/10 text-[#b2ff9b]" : current ? "border-[#20c96b]/30 bg-[#20c96b]/10 text-[#a4efbd]" : "border-white/10 bg-white/[.025] text-zinc-500"}`}>{complete ? "✓" : stage.icon}</div><div className="min-w-0"><div className="text-[10px] uppercase tracking-[.15em] text-zinc-600">Step {index + 1}</div><div className={`mt-0.5 text-sm font-medium ${complete ? "text-[#d7ffd0]" : current ? "text-white" : "text-zinc-400"}`}>{stage.title}</div></div></div>
             <p className="mt-3 text-xs leading-5 text-zinc-500">{stage.detail}</p>
-            <div className="mt-3 flex items-center gap-2 text-[10px] font-medium">{complete ? <span className="text-lime-300">Completed</span> : current ? <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300"/><span className="text-sky-200">In progress</span></> : <span className="text-zinc-600">Up next</span>}</div>
+            <div className="mt-3 flex items-center gap-2 text-[10px] font-medium">{complete ? <span className="text-[#39ff14]">Completed</span> : current ? <><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#20c96b]"/><span className="text-[#a4efbd]">In progress</span></> : <span className="text-zinc-600">Up next</span>}</div>
           </div>;
         })}
       </div>
@@ -63,7 +63,7 @@ export default function ProcessingJourney({ jobId, initialStatus, initialProgres
         .cf-processing-active { animation: breathe 2.4s ease-in-out infinite; }
         .cf-processing-bar { background-size: 200% 100%; animation: shimmer 2.4s linear infinite; }
         @keyframes orbit { to { transform: translateY(-50%) rotate(360deg); } }
-        @keyframes pulse { 50% { opacity: .35; box-shadow: 0 0 4px rgba(196,243,107,.3); } }
+        @keyframes pulse { 50% { opacity: .35; box-shadow: 0 0 4px rgba(57,255,20,.22); } }
         @keyframes breathe { 50% { border-color: rgba(125,211,252,.65); } }
         @keyframes shimmer { to { background-position: -200% 0; } }
         @media (prefers-reduced-motion: reduce) { .cf-processing-orbit,.cf-processing-dot,.cf-processing-active,.cf-processing-bar { animation: none; } }
