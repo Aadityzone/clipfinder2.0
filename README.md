@@ -870,3 +870,34 @@ The product should become more powerful over time without sacrificing correctnes
 This repository is intentionally being built from a clean foundation.
 
 The source of truth is the code, database schema, tests, and documentation in this repository.
+
+## Evaluating highlight quality
+
+The AI service includes a repeatable offline benchmark runner for comparing ranked clip predictions with **human-labelled timestamp ranges**. It reports per-video and aggregate precision@K, recall@K, F1@K, and temporal intersection-over-union (IoU). This validates temporal matching and ranking coverage; it does not itself prove that a clip is entertaining or contextually correct.
+
+Create a JSON file with labelled examples:
+
+```json
+{
+  "cases": [
+    {
+      "id": "stream-example",
+      "predictions": [
+        { "start": 123.0, "end": 142.0, "score": 88.0 },
+        { "start": 420.0, "end": 438.0, "score": 71.0 }
+      ],
+      "ground_truth": [
+        { "start": 126.0, "end": 140.0 }
+      ]
+    }
+  ]
+}
+```
+
+Run the evaluator from the repository root:
+
+```powershell
+python -m ai.scripts.evaluate_highlights --input ai/benchmarks/your-labels.json --top-k 10 --iou-threshold 0.5 --output ai/benchmarks/report.json
+```
+
+Predictions should be ordered by model score (the evaluator sorts them). Keep a fixed labelled set when comparing ranking changes, include different content genres, and report per-video metrics alongside aggregate metrics. Do not treat an unlabelled sample or a synthetic test fixture as a measured quality result.
