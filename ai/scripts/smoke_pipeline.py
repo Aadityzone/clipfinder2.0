@@ -32,6 +32,15 @@ from ai.services.render import render
 from ai.transcribe import transcribe
 
 
+class SmokeStageError(RuntimeError):
+    """Attach a stable pipeline stage name to a smoke-test failure."""
+
+    def __init__(self, stage: str, error: Exception):
+        super().__init__(str(error))
+        self.stage = stage
+        self.error_type = type(error).__name__
+
+
 def _number(value: Any, fallback: float = 0.0) -> float:
     try:
         result = float(value)
@@ -70,16 +79,22 @@ def run_pipeline(
     source_label: str | None = None,
 ) -> dict:
     if not source.is_file():
-        raise FileNotFoundError(f"Source video does not exist: {source}")
+        raise SmokeStageError("source", FileNotFoundError(f"Source video does not exist: {source}"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    metadata = ffprobe(str(source))
+    try:
+        metadata = ffprobe(str(source))
+    except Exception as exc:
+        raise SmokeStageError("media_probe", exc) from exc
     duration = _number(metadata.get("duration"))
     if duration <= 0:
         raise RuntimeError("Source video has no valid duration.")
     if not metadata.get("width") or not metadata.get("height"):
         raise RuntimeError("Source does not contain a valid video stream.")
 
-    transcript_result = transcribe(str(source), language)
+    try:
+        transcript_result = transcribe(str(source), language)
+    except Exception as exc:
+        raise SmokeStageError("transcription", exc) from exc
     segments = transcript_result.get("segments") or []
     transcript_text = str(transcript_result.get("text") or "")
     (output_dir / "transcript.json").write_text(
@@ -87,11 +102,14 @@ def run_pipeline(
         encoding="utf-8",
     )
 
-    analysis_result = analyze(AnalyzeRequest(
-        segments=segments,
-        media_path=str(source),
-        genre=genre,
-    ))
+    try:
+        analysis_result = analyze(AnalyzeRequest(
+            segments=segments,
+            media_path=str(source),
+            genre=genre,
+        ))
+    except Exception as exc:
+        raise SmokeStageError("analysis", exc) from exc
     candidates = analysis_result.get("candidates") or []
     rendered = []
     for index, candidate in enumerate(candidates[:max(1, min(top, 10))], start=1):
@@ -101,17 +119,27 @@ def run_pipeline(
             continue
         filename = f"clip-{index:02d}.mp4"
         output_path = output_dir / filename
-        render(
-            str(source),
-            str(output_path),
-            start=start,
-            end=end,
-            aspect="9:16",
-            segments=[{"start": start, "end": end}],
-            captions=_captions_for_clip(segments, start, end),
-        )
-        if not output_path.is_file() or output_path.stat().st_size == 0:
-            raise RuntimeError(f"Renderer did not produce a valid file: {output_path}")
+        try:
+            render(
+                str(source),
+                str(output_path),
+                start=start,
+                end=end,
+                aspect="9:16",
+                segments=[{"start": start, "end": end}],
+                captions=_captions_for_clip(segments, start, end),
+            )
+            if not output_path.is_file() or output_path.stat().st_size == 0:
+                raise RuntimeError(f"Renderer did not produce a valid file: {output_path}")
+            rendered_metadata = ffprobe(str(output_path))
+            if (
+                _number(rendered_metadata.get("duration")) <= 0
+                or not rendered_metadata.get("width")
+                or not rendered_metadata.get("height")
+            ):
+                raise RuntimeError(f"Rendered output is not a playable video: {output_path}")
+        except Exception as exc:
+            raise SmokeStageError("render", exc) from exc
         rendered.append({
             "file": filename,
             "start": round(start, 3),
@@ -185,9 +213,9 @@ def main() -> int:
     except Exception as exc:
         failure = {
             "status": "failed",
-            "stage": "download" if args.url else "pipeline",
+            "stage": getattr(exc, "stage", "download" if args.url else "pipeline"),
             "source": args.url or str(args.source),
-            "errorType": type(exc).__name__,
+            "errorType": getattr(exc, "error_type", type(exc).__name__),
             "error": str(exc),
         }
         # Keep a machine-readable failure artifact so CI failures are diagnosable

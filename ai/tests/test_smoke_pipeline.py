@@ -74,3 +74,61 @@ def test_smoke_failure_writes_machine_readable_report(monkeypatch, tmp_path, cap
     assert report["errorType"] == "RuntimeError"
     assert "provider rejected request" in report["error"]
     assert json.loads(capsys.readouterr().err)["status"] == "failed"
+
+
+def test_smoke_report_identifies_analysis_failure_for_url_source(monkeypatch, tmp_path, capsys):
+    import json
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    output = tmp_path / "failed-analysis"
+    monkeypatch.setattr(smoke_pipeline, "download", lambda *_args: str(source))
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: {
+        "duration": 20, "width": 640, "height": 360, "hasAudio": True,
+    })
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: {
+        "language": "en", "text": "hello", "segments": [],
+    })
+    def fail_analysis(*_args):
+        raise ValueError("analysis contract failed")
+    monkeypatch.setattr(smoke_pipeline, "analyze", fail_analysis)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["smoke_pipeline.py", "--url", "https://example.com/video", "--out-dir", str(output)],
+    )
+
+    assert smoke_pipeline.main() == 1
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["stage"] == "analysis"
+    assert report["errorType"] == "ValueError"
+    assert report["source"] == "https://example.com/video"
+    assert "analysis contract failed" in capsys.readouterr().err
+
+
+def test_smoke_rejects_render_that_is_not_probeable_video(monkeypatch, tmp_path):
+    import pytest
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    probes = iter([
+        {"duration": 20, "width": 640, "height": 360},
+        {"duration": 0, "width": None, "height": None},
+    ])
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: next(probes))
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: {
+        "language": "en", "text": "hello", "segments": [],
+    })
+    monkeypatch.setattr(smoke_pipeline, "analyze", lambda *_args: {"candidates": [
+        {"start": 1, "end": 3, "score": 80},
+    ]})
+    def fake_render(_source, output_path, **_kwargs):
+        from pathlib import Path
+        Path(output_path).write_bytes(b"not actually an mp4")
+    monkeypatch.setattr(smoke_pipeline, "render", fake_render)
+
+    with pytest.raises(smoke_pipeline.SmokeStageError, match="not a playable video") as failure:
+        smoke_pipeline.run_pipeline(source, tmp_path / "out")
+
+    assert failure.value.stage == "render"

@@ -91,3 +91,12 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 3. Inspect `ai/scripts/smoke_pipeline.py` and its tests; improve stage-level diagnostics and test report output.
 4. Run relevant tests and check CI.
 5. Update this document with verified results, not assumptions.
+
+## Latest local audit and smoke-runner change (2026-10-16)
+
+- Audited the shared pipeline and web worker on `build/universal-genre-foundation` at `f263ebf`. The working tree also contained pre-existing user changes in `web/next-env.d.ts`, `web/tsconfig.json`, and an untracked `package-lock.json`; these were left untouched.
+- Updated `ai/scripts/smoke_pipeline.py` to report stable failure stages for source validation, media probing, transcription, analysis, and rendering. The runner now probes each rendered file with FFprobe and rejects output without positive duration and video dimensions.
+- Added regression cases in `ai/tests/test_smoke_pipeline.py` for URL analysis-stage attribution and unprobeable rendered output.
+- Verification: `python -m pytest -q -p no:cacheprovider ai/tests/test_smoke_pipeline.py` — 6 passed. The run required an installed `opencv-python-headless` dependency and execution outside the sandbox because its temporary-directory fixture was denied inside the sandbox.
+- No real-media smoke run was performed: no local video fixture was found, and a rights-authorized source URL was not provided. The workflow is manual (`workflow_dispatch`); the named workflow was not available through the workflow-specific Actions query on the current default branch. The latest general branch CI run observed before this local change was green for `f263ebf` (run `38901133353`); it does not verify these uncommitted changes.
+- The current source confirms the limits described above: candidate and genre decisions remain mostly transcript/media-signal heuristics; visual action is sampled and shallow; no human-labelled benchmark set or measured quality results were found. Web worker/database persistence, chunked jobs, editing and rendering code exist, but their combined real-media path remains unverified.
