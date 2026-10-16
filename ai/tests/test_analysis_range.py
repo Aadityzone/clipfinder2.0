@@ -78,3 +78,10 @@ def test_shift_segments_ignores_non_object_rows_and_invalid_collections(segments
 def test_extract_analysis_range_rejects_invalid_boundaries(start, end, tmp_path):
     with pytest.raises(ValueError):
         extract_analysis_range("source.mp4", start, end, str(tmp_path / "range.mp4"))
+
+
+def test_shift_segments_accepts_numeric_string_range_boundaries():
+    result = shift_segments_to_range(
+        [{"start": 11, "end": 14, "text": "numeric range"}], "10", "15"
+    )
+    assert [(row["start"], row["end"]) for row in result] == [(1.0, 4.0)]

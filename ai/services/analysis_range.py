@@ -55,8 +55,8 @@ def shift_segments_to_range(segments: list[dict[str, Any]], start: float, end: f
         if clipped_end <= clipped_start:
             continue
         local = dict(segment)
-        local["start"] = round(clipped_start - start, 3)
-        local["end"] = round(clipped_end - start, 3)
+        local["start"] = round(clipped_start - range_start, 3)
+        local["end"] = round(clipped_end - range_start, 3)
         result.append(local)
     return result
 
