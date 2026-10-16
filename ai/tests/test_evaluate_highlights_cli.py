@@ -61,3 +61,35 @@ def test_load_cases_reports_invalid_json(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError, match="Could not read benchmark JSON"):
         _load_cases(path)
+
+
+
+def test_dataset_evaluator_reports_metrics_by_genre():
+    cases = [
+        {
+            "id": "gaming-1",
+            "genre": "Gaming",
+            "predictions": [{"start": 10, "end": 20, "score": 90}],
+            "ground_truth": [{"start": 11, "end": 19}],
+        },
+        {
+            "id": "podcast-1",
+            "genre": "Podcast",
+            "predictions": [{"start": 50, "end": 60, "score": 10}],
+            "ground_truth": [{"start": 70, "end": 80}],
+        },
+        {
+            "id": "gaming-2",
+            "genre": "gaming",
+            "predictions": [{"start": 100, "end": 110, "score": 90}],
+            "ground_truth": [{"start": 101, "end": 109}],
+        },
+    ]
+
+    report = evaluate_dataset(cases, top_k=1)
+    assert set(report["byGenre"]) == {"gaming", "podcast"}
+    assert report["byGenre"]["gaming"]["benchmarkCount"] == 2
+    assert report["byGenre"]["gaming"]["precisionAtK"] == 1.0
+    assert report["byGenre"]["podcast"]["benchmarkCount"] == 1
+    assert report["byGenre"]["podcast"]["matchedCount"] == 0
+    assert [case["genre"] for case in report["cases"]] == ["gaming", "podcast", "gaming"]

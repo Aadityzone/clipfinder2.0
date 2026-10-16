@@ -40,6 +40,7 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
             raise ValueError(f"Benchmark case {index} must include 'predictions' and 'ground_truth' lists.")
         valid.append({
             "id": str(case.get("id") or case.get("name") or f"case-{index + 1}"),
+            "genre": str(case.get("genre") or "unknown").strip().lower() or "unknown",
             "predictions": predictions,
             "ground_truth": labels,
         })
@@ -50,13 +51,21 @@ def evaluate_dataset(
     cases: list[dict[str, Any]], *, top_k: int = 10, iou_threshold: float = 0.5
 ) -> dict[str, Any]:
     reports = []
+    genre_reports: dict[str, list[dict[str, Any]]] = {}
     for case in cases:
         metrics = evaluate_ranked_candidates(
             case["predictions"], case["ground_truth"],
             top_k=top_k, iou_threshold=iou_threshold,
         )
-        reports.append({"id": case["id"], **metrics})
+        genre = str(case.get("genre") or "unknown").strip().lower() or "unknown"
+        case_report = {"id": case["id"], "genre": genre, **metrics}
+        reports.append(case_report)
+        genre_reports.setdefault(genre, []).append(metrics)
     aggregate = aggregate_evaluation_reports(reports)
+    by_genre = {
+        genre: aggregate_evaluation_reports(metrics)
+        for genre, metrics in sorted(genre_reports.items())
+    }
     return {
         "schemaVersion": 1,
         "method": "greedy interval-IoU matching; one prediction per ground-truth moment",
@@ -64,6 +73,7 @@ def evaluate_dataset(
         "requestedIoUThreshold": iou_threshold if math.isfinite(iou_threshold) else 0.5,
         "cases": reports,
         "aggregate": aggregate,
+        "byGenre": by_genre,
     }
 
 
