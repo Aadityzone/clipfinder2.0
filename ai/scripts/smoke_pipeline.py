@@ -195,7 +195,7 @@ def main() -> int:
         try:
             args.out_dir.mkdir(parents=True, exist_ok=True)
             (args.out_dir / "report.json").write_text(
-                json.dumps(failure, indent=2, ensure_ascii=False) + "\\n",
+                json.dumps(failure, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
         except OSError as artifact_error:
