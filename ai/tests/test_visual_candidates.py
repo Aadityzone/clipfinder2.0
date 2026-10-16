@@ -96,3 +96,23 @@ def test_out_of_range_strong_events_do_not_displace_valid_candidates():
     assert len(result) == 1
     assert result[0]["start"] == 8
     assert result[0]["end"] == 30
+
+
+def test_window_text_ignores_malformed_transcript_rows():
+    from ai.services.visual_candidates import _window_text
+
+    assert _window_text([
+        None,
+        {"start": "bad", "end": 4, "text": "invalid"},
+        {"start": 1, "end": 3, "text": "valid moment"},
+    ], 0, 4) == "valid moment"
+    assert _window_text(None, 0, 4) == ""
+
+
+def test_string_action_labels_are_not_split_into_characters():
+    result = multimodal_event_candidates(
+        [],
+        {"onScreen": {"samples": [{"time": 5, "actionLabels": "combat"}]}},
+        duration=20,
+    )
+    assert result == []

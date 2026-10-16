@@ -19,11 +19,19 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 
 def _window_text(segments: list[dict], start: float, end: float) -> str:
-    return " ".join(
-        str(segment.get("text", "")).strip()
-        for segment in segments
-        if _number(segment.get("end")) > start and _number(segment.get("start")) < end
-    ).strip()
+    if not isinstance(segments, list):
+        return ""
+    pieces = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        seg_start = _number(segment.get("start"), -1)
+        seg_end = _number(segment.get("end"), -1)
+        if seg_start >= 0 and seg_end > seg_start and seg_end > start and seg_start < end:
+            text = str(segment.get("text", "")).strip()
+            if text:
+                pieces.append(text)
+    return " ".join(pieces).strip()
 
 
 def multimodal_event_candidates(
@@ -96,7 +104,8 @@ def multimodal_event_candidates(
 
     for row in screen_samples:
         time = _number(row.get("time"), -1)
-        labels = list(row.get("actionLabels") or [])
+        raw_labels = row.get("actionLabels")
+        labels = raw_labels if isinstance(raw_labels, list) else []
         if time >= 0 and labels and (duration_value <= 0 or time <= duration_value):
             events.append({"time": time, "strength": 0.72, "kind": "on_screen_action",
                            "evidence": {"onScreenActionLabels": sorted(set(map(str, labels))),
