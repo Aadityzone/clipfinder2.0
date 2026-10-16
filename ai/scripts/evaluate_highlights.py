@@ -1,115 +1,93 @@
-"""Evaluate one benchmark or a directory of human-labelled highlight benchmarks.
+"""Evaluate ranked highlight predictions against a small human-labelled JSON dataset.
 
-Each JSON file contains predictions and ground_truth timestamp ranges, with an
-optional genre field. Directory mode reports per-file, per-genre, and aggregate
-metrics; it never creates synthetic labels or claims accuracy without labels.
+Input JSON format:
+{
+  "cases": [
+    {"id": "video-1", "predictions": [{"start": 12, "end": 25, "score": 87}],
+     "ground_truth": [{"start": 14, "end": 24}]}
+  ]
+}
 
 Run from repository root:
-  PYTHONPATH=. python ai/scripts/evaluate_highlights.py benchmark.json
-  PYTHONPATH=. python ai/scripts/evaluate_highlights.py benchmarks/ --recursive
+  python -m ai.scripts.evaluate_highlights --input ai/benchmarks/example.json
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import sys
 from pathlib import Path
 from typing import Any
 
 from ai.services.evaluation import aggregate_evaluation_reports, evaluate_ranked_candidates
 
 
-def _load_benchmark(path: Path, *, top_k: int, iou: float) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path}: benchmark root must be a JSON object")
-    predictions = payload.get("predictions")
-    ground_truth = payload.get("ground_truth")
-    if not isinstance(predictions, list) or not isinstance(ground_truth, list):
-        raise ValueError(f"{path}: expected predictions and ground_truth arrays")
-    if not all(isinstance(item, dict) for item in predictions + ground_truth):
-        raise ValueError(f"{path}: predictions and ground_truth entries must be objects")
+def _load_cases(path: Path) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read benchmark JSON at {path}: {exc}") from exc
+    cases = data.get("cases") if isinstance(data, dict) else data
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("Benchmark input must be a non-empty list or an object with a non-empty 'cases' list.")
+    valid = []
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            raise ValueError(f"Benchmark case {index} must be an object.")
+        predictions, labels = case.get("predictions"), case.get("ground_truth")
+        if not isinstance(predictions, list) or not isinstance(labels, list):
+            raise ValueError(f"Benchmark case {index} must include 'predictions' and 'ground_truth' lists.")
+        valid.append({
+            "id": str(case.get("id") or case.get("name") or f"case-{index + 1}"),
+            "predictions": predictions,
+            "ground_truth": labels,
+        })
+    return valid
 
-    report = evaluate_ranked_candidates(
-        predictions, ground_truth, top_k=top_k, iou_threshold=iou
-    )
-    report["benchmark"] = str(path)
-    genre = payload.get("genre")
-    report["genre"] = str(genre).strip().lower() if genre else "unspecified"
-    return report
+
+def evaluate_dataset(
+    cases: list[dict[str, Any]], *, top_k: int = 10, iou_threshold: float = 0.5
+) -> dict[str, Any]:
+    reports = []
+    for case in cases:
+        metrics = evaluate_ranked_candidates(
+            case["predictions"], case["ground_truth"],
+            top_k=top_k, iou_threshold=iou_threshold,
+        )
+        reports.append({"id": case["id"], **metrics})
+    aggregate = aggregate_evaluation_reports(reports)
+    return {
+        "schemaVersion": 1,
+        "method": "greedy interval-IoU matching; one prediction per ground-truth moment",
+        "topK": max(1, int(top_k)),
+        "requestedIoUThreshold": iou_threshold if math.isfinite(iou_threshold) else 0.5,
+        "cases": reports,
+        "aggregate": aggregate,
+    }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "benchmark",
-        type=Path,
-        help="JSON benchmark file or directory containing benchmark JSON files",
-    )
-    parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--iou", type=float, default=0.5)
-    parser.add_argument(
-        "--recursive",
-        action="store_true",
-        help="search benchmark directories recursively",
-    )
-    args = parser.parse_args()
-
+    parser.add_argument("--input", required=True, type=Path, help="JSON file with ranked predictions and human-labelled intervals")
+    parser.add_argument("--output", type=Path, help="Optional path to write the JSON report (stdout if omitted)")
+    parser.add_argument("--top-k", type=int, default=10, help="Number of highest-scoring predictions to evaluate")
+    parser.add_argument("--iou-threshold", type=float, default=0.5, help="Minimum temporal intersection-over-union for a match")
+    args = parser.parse_args(argv)
     if args.top_k < 1:
         parser.error("--top-k must be at least 1")
-    if not 0 <= args.iou <= 1:
-        parser.error("--iou must be between 0 and 1")
-    if not args.benchmark.exists():
-        parser.error(f"benchmark path does not exist: {args.benchmark}")
-
-    if args.benchmark.is_file():
-        paths = [args.benchmark]
-    elif args.benchmark.is_dir():
-        paths = sorted(
-            args.benchmark.rglob("*.json")
-            if args.recursive
-            else args.benchmark.glob("*.json")
-        )
-    else:
-        parser.error("benchmark path must be a JSON file or directory")
-        return 2
-
-    if not paths:
-        parser.error(f"no JSON benchmark files found in {args.benchmark}")
-
+    if not math.isfinite(args.iou_threshold) or not 0 <= args.iou_threshold <= 1:
+        parser.error("--iou-threshold must be finite and between 0 and 1")
     try:
-        reports = [
-            _load_benchmark(path, top_k=args.top_k, iou=args.iou)
-            for path in paths
-        ]
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        report = evaluate_dataset(_load_cases(args.input), top_k=args.top_k, iou_threshold=args.iou_threshold)
+        rendered = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(rendered, encoding="utf-8")
+        else:
+            sys.stdout.write(rendered)
+    except ValueError as exc:
         parser.error(str(exc))
-
-    # Preserve the original single-file output contract for existing workflows.
-    if args.benchmark.is_file():
-        print(json.dumps(reports[0], indent=2, sort_keys=True))
-        return 0
-
-    by_genre: dict[str, list[dict[str, Any]]] = {}
-    for report in reports:
-        by_genre.setdefault(report["genre"], []).append(report)
-    genre_reports = {
-        genre: aggregate_evaluation_reports(items)
-        for genre, items in sorted(by_genre.items())
-    }
-    output = {
-        "benchmarkCount": len(reports),
-        "topK": args.top_k,
-        "iouThreshold": args.iou,
-        "benchmarks": reports,
-        "byGenre": genre_reports,
-        "overall": aggregate_evaluation_reports(reports),
-        "notes": [
-            "Metrics are meaningful only when ground_truth ranges are human-labelled.",
-            "Overall metrics are micro-aggregated; byGenre metrics include macro averages.",
-            "A benchmark's genre is read from its JSON genre field, or marked unspecified.",
-        ],
-    }
-    print(json.dumps(output, indent=2, sort_keys=True))
     return 0
 
 
