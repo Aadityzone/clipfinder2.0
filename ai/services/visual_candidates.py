@@ -34,11 +34,32 @@ def multimodal_event_candidates(
     max_candidates: int = 40,
 ) -> list[dict]:
     """Build bounded candidate windows from timestamped audio/visual event evidence."""
-    duration_value = _number(duration, 0.0)
-    visual_samples = media.get("visual", {}).get("samples", []) or []
-    audio_windows = media.get("audioWindows", []) or []
-    scenes = media.get("scenes", {}).get("sceneChanges", []) or []
-    screen_samples = media.get("onScreen", {}).get("samples", []) or []
+    duration_value = max(0.0, _number(duration, 0.0))
+    try:
+        threshold = float(min_event_strength)
+    except (TypeError, ValueError, OverflowError):
+        threshold = 0.58
+    if threshold != threshold or abs(threshold) == float("inf"):
+        threshold = 0.58
+    threshold = max(0.0, min(1.0, threshold))
+    try:
+        candidate_limit = int(max_candidates)
+    except (TypeError, ValueError, OverflowError):
+        candidate_limit = 40
+    candidate_limit = max(0, min(100, candidate_limit))
+    if candidate_limit == 0 or not isinstance(media, dict):
+        return []
+    visual_block = media.get("visual")
+    scenes_block = media.get("scenes")
+    on_screen_block = media.get("onScreen")
+    visual_samples = visual_block.get("samples", []) if isinstance(visual_block, dict) else []
+    audio_windows = media.get("audioWindows", [])
+    scenes = scenes_block.get("sceneChanges", []) if isinstance(scenes_block, dict) else []
+    screen_samples = on_screen_block.get("samples", []) if isinstance(on_screen_block, dict) else []
+    visual_samples = [row for row in (visual_samples or []) if isinstance(row, dict)]
+    audio_windows = [row for row in (audio_windows or []) if isinstance(row, dict)]
+    screen_samples = [row for row in (screen_samples or []) if isinstance(row, dict)]
+    scenes = scenes if isinstance(scenes, list) else []
     if not any((visual_samples, audio_windows, scenes, screen_samples)):
         return []
 
@@ -50,7 +71,7 @@ def multimodal_event_candidates(
         change = max(0.0, min(1.0, _number(row.get("visualChange"))))
         motion = max(0.0, min(1.0, _number(row.get("motion"))))
         strength = max(change, motion)
-        if strength >= min_event_strength:
+        if strength >= threshold:
             events.append({"time": time, "strength": strength, "kind": "visual_change",
                            "evidence": {"visualChange": change, "motion": motion}})
 
@@ -87,12 +108,14 @@ def multimodal_event_candidates(
         if any(abs(event["time"] - kept["time"]) < 8.0 for kept in selected):
             continue
         selected.append(event)
-        if len(selected) >= max_candidates:
+        if len(selected) >= candidate_limit:
             break
 
     proposals = []
     for event in selected:
         center = event["time"]
+        if duration_value > 0 and center > duration_value:
+            continue
         start = max(0.0, center - 12.0)
         end = center + 18.0
         if duration_value > 0:
@@ -115,9 +138,11 @@ def multimodal_event_candidates(
             row for row in screen_samples
             if start <= _number(row.get("time"), -1) <= end
         ]
+        vision_block = media.get("vision")
+        face_rows = vision_block.get("faces", []) if isinstance(vision_block, dict) else []
         window_faces = [
-            row for row in media.get("vision", {}).get("faces", []) or []
-            if start <= _number(row.get("time"), -1) <= end
+            row for row in (face_rows or [])
+            if isinstance(row, dict) and start <= _number(row.get("time"), -1) <= end
         ]
         evidence["visualChange"] = round(
             sum(_number(row.get("visualChange")) for row in window_visual) / len(window_visual), 4
