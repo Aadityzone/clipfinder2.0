@@ -14,7 +14,7 @@ def interval_iou(a: dict[str, Any], b: dict[str, Any]) -> float:
     try:
         a_start, a_end = float(a["start"]), float(a["end"])
         b_start, b_end = float(b["start"]), float(b["end"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         return 0.0
     if not all(map(math.isfinite, (a_start, a_end, b_start, b_end))):
         return 0.0
@@ -33,18 +33,23 @@ def evaluate_ranked_candidates(
     iou_threshold: float = 0.5,
 ) -> dict[str, Any]:
     """Greedily match top-ranked predictions to unique labels and report metrics."""
-    k = max(1, int(top_k))
+    try:
+        k = max(1, int(top_k))
+    except (TypeError, ValueError, OverflowError):
+        k = 10
+    prediction_rows = predictions if isinstance(predictions, Sequence) and not isinstance(predictions, (str, bytes)) else ()
+    label_rows = ground_truth if isinstance(ground_truth, Sequence) and not isinstance(ground_truth, (str, bytes)) else ()
     try:
         requested_threshold = float(iou_threshold)
     except (TypeError, ValueError, OverflowError):
         requested_threshold = 0.5
     threshold = min(1.0, max(0.0, requested_threshold)) if math.isfinite(requested_threshold) else 0.5
     ranked = sorted(
-        (p for p in predictions if _valid_interval(p)),
+        (p for p in prediction_rows if _valid_interval(p)),
         key=lambda item: _finite_score(item.get("score")),
         reverse=True,
     )[:k]
-    labels = [g for g in ground_truth if _valid_interval(g)]
+    labels = [g for g in label_rows if _valid_interval(g)]
 
     matched_labels: set[int] = set()
     matched_predictions = 0
@@ -67,8 +72,8 @@ def evaluate_ranked_candidates(
     recall = matched_predictions / len(labels) if labels else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
     return {
-        "predictionCount": len(predictions),
-        "validPredictionCount": sum(1 for p in predictions if _valid_interval(p)),
+        "predictionCount": len(prediction_rows),
+        "validPredictionCount": sum(1 for p in prediction_rows if _valid_interval(p)),
         "groundTruthCount": len(labels),
         "evaluatedTopK": len(ranked),
         "iouThreshold": threshold,
@@ -140,7 +145,7 @@ def _valid_interval(item: Any) -> bool:
         return False
     try:
         start, end = float(item["start"]), float(item["end"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         return False
     return math.isfinite(start) and math.isfinite(end) and start >= 0 and end > start
 

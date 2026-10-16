@@ -133,3 +133,22 @@ def test_aggregate_ignores_malformed_reports_and_clamps_metrics():
     assert result["macroRecallAtK"] == 0.75
     assert result["macroF1AtK"] == 0.25
     assert result["meanMatchedIoU"] == 0.75
+
+
+def test_evaluation_handles_missing_or_non_sequence_collections():
+    assert evaluate_ranked_candidates(None, None)["predictionCount"] == 0
+    assert evaluate_ranked_candidates("not predictions", {"start": 0, "end": 1})["groundTruthCount"] == 0
+
+
+def test_evaluation_handles_unconvertible_extreme_values():
+    class HugeNumber:
+        def __float__(self):
+            raise OverflowError("too large")
+
+    assert interval_iou(
+        {"start": HugeNumber(), "end": 3}, {"start": 0, "end": 3}
+    ) == 0.0
+    result = evaluate_ranked_candidates(
+        [{"start": HugeNumber(), "end": 3}], [{"start": 0, "end": 3}]
+    )
+    assert result["validPredictionCount"] == 0
