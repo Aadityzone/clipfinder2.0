@@ -112,3 +112,24 @@ def test_evaluator_ignores_non_object_rows_and_non_finite_scores():
     assert result["validPredictionCount"] == 2
     assert result["groundTruthCount"] == 1
     assert result["matchedCount"] == 1
+
+
+def test_aggregate_ignores_malformed_reports_and_clamps_metrics():
+    result = aggregate_evaluation_reports([
+        None,
+        {"predictionCount": "bad", "groundTruthCount": -2,
+         "matchedCount": float("inf"), "evaluatedTopK": 0,
+         "precisionAtK": float("nan"), "recallAtK": 2,
+         "f1AtK": -1, "meanMatchedIoU": "not-a-number"},
+        {"predictionCount": 3, "groundTruthCount": 2, "matchedCount": 1,
+         "evaluatedTopK": 2, "precisionAtK": 0.5, "recallAtK": 0.5,
+         "f1AtK": 0.5, "meanMatchedIoU": 0.75},
+    ])
+    assert result["benchmarkCount"] == 2
+    assert result["predictionCount"] == 3
+    assert result["groundTruthCount"] == 2
+    assert result["matchedCount"] == 1
+    assert result["macroPrecisionAtK"] == 0.25
+    assert result["macroRecallAtK"] == 0.75
+    assert result["macroF1AtK"] == 0.25
+    assert result["meanMatchedIoU"] == 0.75

@@ -81,7 +81,11 @@ def evaluate_ranked_candidates(
 
 
 def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Combine benchmark reports using count-weighted metrics and macro averages."""
+    """Combine benchmark reports using count-weighted metrics and macro averages.
+
+    Malformed rows are ignored so one corrupt report cannot invalidate a benchmark.
+    """
+    reports = [report for report in reports if isinstance(report, dict)]
     if not reports:
         return {
             "benchmarkCount": 0,
@@ -98,20 +102,20 @@ def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str,
             "meanMatchedIoU": 0.0,
         }
 
-    prediction_count = sum(int(report.get("predictionCount", 0)) for report in reports)
-    ground_truth_count = sum(int(report.get("groundTruthCount", 0)) for report in reports)
-    matched_count = sum(int(report.get("matchedCount", 0)) for report in reports)
-    evaluated_count = sum(int(report.get("evaluatedTopK", 0)) for report in reports)
+    prediction_count = sum(_nonnegative_int(report.get("predictionCount")) for report in reports)
+    ground_truth_count = sum(_nonnegative_int(report.get("groundTruthCount")) for report in reports)
+    matched_count = sum(_nonnegative_int(report.get("matchedCount")) for report in reports)
+    evaluated_count = sum(_nonnegative_int(report.get("evaluatedTopK")) for report in reports)
     precision = matched_count / evaluated_count if evaluated_count else 0.0
     recall = matched_count / ground_truth_count if ground_truth_count else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     matched_iou_weight = sum(
-        float(report.get("meanMatchedIoU", 0.0)) * int(report.get("matchedCount", 0))
+        _bounded_metric(report.get("meanMatchedIoU")) * _nonnegative_int(report.get("matchedCount"))
         for report in reports
     )
-    macro_precision = sum(float(r.get("precisionAtK", 0.0)) for r in reports) / len(reports)
-    macro_recall = sum(float(r.get("recallAtK", 0.0)) for r in reports) / len(reports)
-    macro_f1 = sum(float(r.get("f1AtK", 0.0)) for r in reports) / len(reports)
+    macro_precision = sum(_bounded_metric(r.get("precisionAtK")) for r in reports) / len(reports)
+    macro_recall = sum(_bounded_metric(r.get("recallAtK")) for r in reports) / len(reports)
+    macro_f1 = sum(_bounded_metric(r.get("f1AtK")) for r in reports) / len(reports)
 
     return {
         "benchmarkCount": len(reports),
@@ -149,3 +153,25 @@ def _finite_score(value: Any) -> float:
     except (TypeError, ValueError, OverflowError):
         pass
     return 0.0
+
+
+def _nonnegative_int(value: Any) -> int:
+    """Parse a non-negative count without allowing malformed data to crash aggregation."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    if not math.isfinite(number) or number < 0:
+        return 0
+    return int(number)
+
+
+def _bounded_metric(value: Any) -> float:
+    """Return a finite metric in [0, 1], defaulting invalid values to zero."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return min(1.0, max(0.0, number))
