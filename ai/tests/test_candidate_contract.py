@@ -37,3 +37,19 @@ def test_contract_allows_visual_only_candidate_with_feature_evidence():
     ])
     assert len(result) == 1
     assert result[0]["text"] == ""
+
+
+def test_contract_returns_empty_for_non_collection_inputs():
+    assert validate_candidates(None) == []
+    assert validate_candidates("not a candidate list") == []
+    assert validate_candidates({"start": 0, "end": 1, "score": 1}) == []
+
+
+def test_contract_accepts_iterators_and_skips_bad_rows():
+    rows = iter([
+        None,
+        {"start": 1, "end": 3, "score": 80, "text": "real candidate"},
+    ])
+    result = validate_candidates(rows, media_duration=5)
+    assert len(result) == 1
+    assert result[0]["start"] == 1

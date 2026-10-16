@@ -29,6 +29,9 @@ def validate_candidates(
     its end is clipped to the actual media boundary. Candidates starting at or
     after the source end are rejected. Scores are clamped to [0, 100].
     """
+    if not isinstance(candidates, Iterable) or isinstance(candidates, (str, bytes, dict)):
+        return []
+
     duration_limit = _finite_number(media_duration)
     if duration_limit is not None and duration_limit <= 0:
         duration_limit = None

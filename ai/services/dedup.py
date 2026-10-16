@@ -38,6 +38,9 @@ def deduplicate(candidates: list[dict], threshold: float = 0.55) -> list[dict]:
     Invalid/non-finite intervals are dropped here as a final defensive boundary;
     the candidate contract remains responsible for normalizing API output.
     """
+    if not isinstance(candidates, (list, tuple)):
+        return []
+
     overlap_threshold = _finite(threshold)
     overlap_threshold = min(1.0, max(0.0, overlap_threshold if overlap_threshold is not None else 0.55))
     valid = []
