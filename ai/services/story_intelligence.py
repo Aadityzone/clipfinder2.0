@@ -1,3 +1,4 @@
+import math
 import re
 from dataclasses import dataclass
 
@@ -17,8 +18,8 @@ def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
 
 def _contains_phrase(text: str, phrase: str) -> bool:
-    low = re.sub(r"\\s+", " ", text.lower()).strip()
-    cue = re.sub(r"\\s+", " ", phrase.lower()).strip()
+    low = re.sub(r"\s+", " ", text.lower()).strip()
+    cue = re.sub(r"\s+", " ", phrase.lower()).strip()
     return bool(
         cue
         and re.search(
