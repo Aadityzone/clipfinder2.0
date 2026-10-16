@@ -1,3 +1,4 @@
+import math
 import re
 
 CUES = {
@@ -42,23 +43,48 @@ def score(text: str, start: float, end: float, instruction: str | None = None):
     hook = min(1.0, punct * .55 + question * .35 + cue * .35)
     return round(100 * (.20 * density + .13 * punct + .13 * novelty + .22 * cue + .12 * custom + .20 * hook), 2)
 
+def _number(value, fallback=0.0):
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return number if math.isfinite(number) else fallback
+
+
+def _rows(value):
+    """Return only object rows from optional media evidence collections."""
+    return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
+
+
 def _window_text(segments, start, end):
-    return " ".join(str(s.get("text", "")).strip() for s in segments
-                    if float(s["end"]) > start and float(s["start"]) < end).strip()
+    pieces = []
+    for segment in _rows(segments):
+        seg_start = _number(segment.get("start"), -1)
+        seg_end = _number(segment.get("end"), -1)
+        if seg_start >= 0 and seg_end > seg_start and seg_end > start and seg_start < end:
+            text = str(segment.get("text", "")).strip()
+            if text:
+                pieces.append(text)
+    return " ".join(pieces).strip()
 
 def candidates(segments, instruction=None, categories=None, media=None):
     allowed = {ALIASES.get(str(c).lower(), str(c).lower()) for c in (categories or ["ai_detect"])}
-    media = media or {}
-    faces = media.get("vision", {}).get("faces", [])
-    scenes = media.get("scenes", {}).get("sceneChanges", [])
-    audio = media.get("audioWindows", [])
-    visual = media.get("visual", {}).get("samples", [])
-    on_screen = media.get("onScreen", {}).get("samples", [])
-    semantic = media.get("visualSemantic", [])
+    media = media if isinstance(media, dict) else {}
+    vision = media.get("vision") if isinstance(media.get("vision"), dict) else {}
+    scenes_block = media.get("scenes") if isinstance(media.get("scenes"), dict) else {}
+    visual_block = media.get("visual") if isinstance(media.get("visual"), dict) else {}
+    screen_block = media.get("onScreen") if isinstance(media.get("onScreen"), dict) else {}
+    faces = _rows(vision.get("faces", []))
+    scenes = scenes_block.get("sceneChanges", [])
+    scenes = scenes if isinstance(scenes, list) else []
+    audio = _rows(media.get("audioWindows", []))
+    visual = _rows(visual_block.get("samples", []))
+    on_screen = _rows(screen_block.get("samples", []))
+    semantic = _rows(media.get("visualSemantic", []))
     out = []
-    for idx, s in enumerate(segments):
-        raw_start, raw_end = float(s["start"]), float(s["end"])
-        if raw_end <= raw_start:
+    for idx, s in enumerate(_rows(segments)):
+        raw_start, raw_end = _number(s.get("start"), -1), _number(s.get("end"), -1)
+        if raw_start < 0 or raw_end <= raw_start:
             continue
         # Expand around a transcript segment so the model sees setup + payoff.
         start = max(0.0, raw_start - 4.0)
@@ -78,16 +104,16 @@ def candidates(segments, instruction=None, categories=None, media=None):
                 continue
             cat = ranked[0]
 
-        face_points = [f for f in faces if start <= float(f.get("time", -1)) <= end]
+        face_points = [f for f in faces if start <= _number(f.get("time"), -1) <= end]
         face_hits = len(face_points)
-        focus_x = (sum(float(f.get("x", .5)) for f in face_points) / face_hits) if face_hits else .5
-        scene_hits = sum(1 for x in scenes if start <= float(x) <= end)
-        audio_rows = [a for a in audio if float(a.get("end", 0)) > start and float(a.get("start", 0)) < end]
-        energy = sum(float(a.get("energy", 0)) for a in audio_rows) / len(audio_rows) if audio_rows else 0.0
-        visual_rows = [v for v in visual if start <= float(v.get("time", -1)) <= end]
-        visual_change = sum(float(v.get("visualChange", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
-        motion = sum(float(v.get("motion", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
-        center_detail = sum(float(v.get("centerDetail", 0)) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        focus_x = (sum(_number(f.get("x"), .5) for f in face_points) / face_hits) if face_hits else .5
+        scene_hits = sum(1 for x in scenes if start <= _number(x, -1) <= end)
+        audio_rows = [a for a in audio if _number(a.get("end")) > start and _number(a.get("start")) < end]
+        energy = sum(_number(a.get("energy")) for a in audio_rows) / len(audio_rows) if audio_rows else 0.0
+        visual_rows = [v for v in visual if start <= _number(v.get("time"), -1) <= end]
+        visual_change = sum(_number(v.get("visualChange")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        motion = sum(_number(v.get("motion")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
+        center_detail = sum(_number(v.get("centerDetail")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
         screen_rows = [v for v in on_screen if start <= float(v.get("time", -1)) <= end]
         action_labels = sorted({label for row in screen_rows for label in row.get("actionLabels", [])})
         ocr_text = " ".join(str(row.get("ocrText", "")) for row in screen_rows).strip()
