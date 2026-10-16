@@ -114,12 +114,16 @@ def candidates(segments, instruction=None, categories=None, media=None):
         visual_change = sum(_number(v.get("visualChange")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
         motion = sum(_number(v.get("motion")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
         center_detail = sum(_number(v.get("centerDetail")) for v in visual_rows) / len(visual_rows) if visual_rows else 0.0
-        screen_rows = [v for v in on_screen if start <= float(v.get("time", -1)) <= end]
-        action_labels = sorted({label for row in screen_rows for label in row.get("actionLabels", [])})
+        screen_rows = [v for v in on_screen if start <= _number(v.get("time"), -1) <= end]
+        action_labels = sorted({
+            str(label)
+            for row in screen_rows
+            for label in (row.get("actionLabels") if isinstance(row.get("actionLabels"), list) else [])
+        })
         ocr_text = " ".join(str(row.get("ocrText", "")) for row in screen_rows).strip()
         gameplay_like = sum(1 for row in screen_rows if row.get("gameplayLike")) / len(screen_rows) if screen_rows else 0.0
-        semantic_rows = [v for v in semantic if start <= float(v.get("time", -1)) <= end]
-        semantic_score = sum(float(v.get("score", 0)) for v in semantic_rows) / len(semantic_rows) if semantic_rows else 0.0
+        semantic_rows = [v for v in semantic if start <= _number(v.get("time"), -1) <= end]
+        semantic_score = sum(_number(v.get("score")) for v in semantic_rows) / len(semantic_rows) if semantic_rows else 0.0
 
         # Strong moments tend to have a hook, a change, and a payoff signal.
         score_value = min(100, round(base + min(7, face_hits * 1.2) +
