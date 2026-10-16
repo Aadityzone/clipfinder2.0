@@ -39,3 +39,34 @@ def test_unknown_or_non_numeric_preference_is_ignored():
     ranked = apply_creator_preferences(candidates, {"made_up": 1, "gameplay": "not-a-number"})
 
     assert ranked[0]["score"] == 42
+
+
+def test_creator_feedback_skips_malformed_candidates_and_collections():
+    assert apply_creator_preferences(None, {"gameplay": 1}) == []
+    result = apply_creator_preferences(
+        [None, "bad", {"score": 60, "features": {"gameplayLikeRatio": 1.0}}],
+        {"gameplay": 1},
+    )
+    assert len(result) == 1
+    assert result[0]["score"] > 60
+
+
+def test_creator_feedback_does_not_mutate_candidate_or_features():
+    features = {"gameplayLikeRatio": 1.0}
+    candidate = {"score": 60, "features": features}
+    result = apply_creator_preferences([candidate], {"gameplay": 1})
+    assert "creatorFeedback" not in features
+    assert "creatorFeedback" in result[0]["features"]
+    assert result[0] is not candidate
+
+
+def test_creator_feedback_handles_overflowing_preference_values():
+    class HugeNumber:
+        def __float__(self):
+            raise OverflowError("too large")
+
+    result = apply_creator_preferences(
+        [{"score": 42, "features": {}}],
+        {"gameplay": HugeNumber()},
+    )
+    assert result[0]["score"] == 42
