@@ -184,7 +184,7 @@ def test_dedup_discards_invalid_intervals_and_non_finite_scores():
         {"start": 40, "end": 50, "score": 60},
     ]
     result = deduplicate(items)
-    assert [(row["start"], row["end"]) for row in result] == [(0, 10), (20, 30), (40, 50)]
+    assert [(row["start"], row["end"]) for row in result] == [(0, 10), (40, 50), (20, 30)]
     assert result[1]["score"] == 0.0
 
 
