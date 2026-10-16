@@ -183,11 +183,24 @@ def main() -> int:
                 args.source, args.out_dir, language=args.language, genre=args.genre, top=args.top
             )
     except Exception as exc:
-        print(json.dumps({
+        failure = {
             "status": "failed",
+            "stage": "download" if args.url else "pipeline",
+            "source": args.url or str(args.source),
             "errorType": type(exc).__name__,
             "error": str(exc),
-        }, indent=2), file=sys.stderr)
+        }
+        # Keep a machine-readable failure artifact so CI failures are diagnosable
+        # even when transcription, analysis, or rendering fails before report.json.
+        try:
+            args.out_dir.mkdir(parents=True, exist_ok=True)
+            (args.out_dir / "report.json").write_text(
+                json.dumps(failure, indent=2, ensure_ascii=False) + "\\n",
+                encoding="utf-8",
+            )
+        except OSError as artifact_error:
+            failure["artifactError"] = str(artifact_error)
+        print(json.dumps(failure, indent=2, ensure_ascii=False), file=sys.stderr)
         return 1
 
     print(json.dumps(report, indent=2, ensure_ascii=False))

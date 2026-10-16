@@ -51,3 +51,26 @@ def test_smoke_report_source_label_preserves_public_url_for_downloaded_temp_sour
 
     assert report["source"] == "https://example.com/public-video"
     assert json.loads((output / "report.json").read_text())["source"] == "https://example.com/public-video"
+
+
+def test_smoke_failure_writes_machine_readable_report(monkeypatch, tmp_path, capsys):
+    import json
+    from ai.scripts import smoke_pipeline
+
+    output = tmp_path / "failed-run"
+    def fail_download(_url, _temporary):
+        raise RuntimeError("source provider rejected request")
+    monkeypatch.setattr(smoke_pipeline, "download", fail_download)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["smoke_pipeline.py", "--url", "https://example.com/video", "--out-dir", str(output)],
+    )
+
+    assert smoke_pipeline.main() == 1
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert report["stage"] == "download"
+    assert report["source"] == "https://example.com/video"
+    assert report["errorType"] == "RuntimeError"
+    assert "provider rejected request" in report["error"]
+    assert json.loads(capsys.readouterr().err)["status"] == "failed"
