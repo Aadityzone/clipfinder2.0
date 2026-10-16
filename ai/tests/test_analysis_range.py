@@ -57,3 +57,24 @@ def test_extract_analysis_range_reports_ffmpeg_errors(monkeypatch, tmp_path):
     monkeypatch.setattr("ai.services.analysis_range.subprocess.run", fail)
     with pytest.raises(RuntimeError, match="decode error"):
         extract_analysis_range("source.mp4", 0, 10, str(tmp_path / "range.mp4"))
+
+
+@pytest.mark.parametrize("segments", [None, "bad", [None, "bad", {"start": 1, "end": 2, "text": "ok"}]])
+def test_shift_segments_ignores_non_object_rows_and_invalid_collections(segments):
+    result = shift_segments_to_range(segments, 0, 3)
+    if isinstance(segments, list):
+        assert len(result) == 1
+        assert result[0]["text"] == "ok"
+    else:
+        assert result == []
+
+
+@pytest.mark.parametrize("start,end", [
+    ("bad", 5),
+    (float("nan"), 5),
+    (0, float("inf")),
+    (5, 4),
+])
+def test_extract_analysis_range_rejects_invalid_boundaries(start, end, tmp_path):
+    with pytest.raises(ValueError):
+        extract_analysis_range("source.mp4", start, end, str(tmp_path / "range.mp4"))

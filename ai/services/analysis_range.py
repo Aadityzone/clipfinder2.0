@@ -31,8 +31,18 @@ def validate_analysis_range(start: float, end: float, source_duration: float) ->
 
 def shift_segments_to_range(segments: list[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
     """Clip source-timestamped transcript segments to a range and make them local."""
+    if not isinstance(segments, list):
+        return []
+    try:
+        range_start, range_end = float(start), float(end)
+    except (TypeError, ValueError, OverflowError):
+        return []
+    if not math.isfinite(range_start) or not math.isfinite(range_end) or range_end <= range_start:
+        return []
     result: list[dict[str, Any]] = []
     for segment in segments:
+        if not isinstance(segment, dict):
+            continue
         try:
             segment_start = float(segment.get("start"))
             segment_end = float(segment.get("end"))
@@ -40,8 +50,8 @@ def shift_segments_to_range(segments: list[dict[str, Any]], start: float, end: f
             continue
         if not math.isfinite(segment_start) or not math.isfinite(segment_end) or segment_end <= segment_start:
             continue
-        clipped_start = max(start, segment_start)
-        clipped_end = min(end, segment_end)
+        clipped_start = max(range_start, segment_start)
+        clipped_end = min(range_end, segment_end)
         if clipped_end <= clipped_start:
             continue
         local = dict(segment)
@@ -53,7 +63,13 @@ def shift_segments_to_range(segments: list[dict[str, Any]], start: float, end: f
 
 def extract_analysis_range(source_path: str, start: float, end: float, output_path: str) -> str:
     """Create a timestamp-zeroed, low-resolution analysis copy of one source range."""
-    duration = end - start
+    try:
+        start_value, end_value = float(start), float(end)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Analysis range boundaries must be numeric.") from exc
+    if not math.isfinite(start_value) or not math.isfinite(end_value):
+        raise ValueError("Analysis range boundaries must be finite.")
+    duration = end_value - start_value
     if duration <= 0 or duration > MAX_ANALYSIS_RANGE_SECONDS:
         raise ValueError("Analysis range duration must be greater than zero and at most one hour.")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -61,7 +77,7 @@ def extract_analysis_range(source_path: str, start: float, end: float, output_pa
         subprocess.run(
             [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                "-ss", str(start), "-i", source_path, "-t", str(duration),
+                "-ss", str(start_value), "-i", source_path, "-t", str(duration),
                 "-map", "0:v:0", "-map", "0:a?",
                 "-vf", "fps=2,scale=640:-2",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
