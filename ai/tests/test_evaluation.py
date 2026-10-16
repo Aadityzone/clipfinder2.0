@@ -98,3 +98,17 @@ def test_interval_iou_rejects_non_finite_boundaries():
     assert interval_iou(
         {"start": 0, "end": float("inf")}, {"start": 0, "end": 5}
     ) == 0.0
+
+
+
+def test_evaluator_ignores_non_object_rows_and_non_finite_scores():
+    result = evaluate_ranked_candidates(
+        [None, "bad", {"start": 0, "end": 5, "score": float("nan")},
+         {"start": 1, "end": 4, "score": 90}],
+        [None, {"start": 1, "end": 4}],
+        top_k=10,
+    )
+    assert result["predictionCount"] == 4
+    assert result["validPredictionCount"] == 2
+    assert result["groundTruthCount"] == 1
+    assert result["matchedCount"] == 1

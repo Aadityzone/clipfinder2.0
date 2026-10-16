@@ -131,7 +131,9 @@ def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str,
     }
 
 
-def _valid_interval(item: dict[str, Any]) -> bool:
+def _valid_interval(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
     try:
         start, end = float(item["start"]), float(item["end"])
     except (KeyError, TypeError, ValueError):
