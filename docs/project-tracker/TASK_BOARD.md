@@ -1,0 +1,34 @@
+# Task Board
+
+Priorities: P0 blocks trustworthy processing; P1 reliability/quality; P2 product readiness. Status updated 2026-10-12 from the local baseline run.
+
+| ID | Priority | Owner | Task | Dependencies | Acceptance criteria | Status |
+|---|---|---|---|---|---|---|
+| CF-001 | P0 | Lead/QA | Establish runnable baseline for web + Python tests | Access to repo runtime | Record exact test/typecheck/lint/build results; distinguish blocked external services | COMPLETE — results and failures recorded in TEST_AND_FAILURE_LOG.md; baseline is not green |
+| CF-002 | P0 | Backend/Deploy | Verify worker process runs in deployed/local environment | CF-001 | Create test job and observe worker claim/state transitions; add worker liveness visibility | NOT_STARTED |
+| CF-003 | P0 | AI/Backend | Run authorized real video end-to-end through ingest/transcribe/analyze | CF-002, configured dependencies | Persisted transcript + nonempty valid candidates displayed in workspace | NOT_STARTED |
+| CF-004 | P0 | QA/AI | Re-run candidate overlap and LLM timestamp/index regression tests | CF-001 | Tests pass; regression tests cover bounded timestamps and overlap collapse | NOT_STARTED |
+| CF-005 | P1 | AI | Make optional LLM fallback observable and validate model output | CF-001 | Missing key/timeout/malformed response produces explicit diagnostics without fabricated output | COMPLETE — Agent 2 implementation reviewed; 8 focused tests passed; see TEST_AND_FAILURE_LOG.md |
+| CF-006 | P1 | Rendering | Verify render output before marking READY | CF-003 | File exists, non-empty, ffprobe/decode validation passes; otherwise FAILED | IN_PROGRESS — Editor/exports assignment added source-range and ffprobe output checks; end-to-end artifact remains unverified |
+| CF-007 | P1 | Backend | Add worker health/heartbeat and operational diagnostics | CF-002 | Health/status distinguishes API, DB, storage and worker | VISIBLE PATCH, OWNER UNCONFIRMED — 7 pure unit tests pass; schema migration and integration ownership unresolved |
+| CF-008 | P1 | Backend/QA | Audit usage quotas, trial limits, duplicate-job protection | CF-003 | Server-enforced monthly source-hour quota, atomic reservation, 80% warning, hard cap | NOT_STARTED |
+| CF-009 | P1 | Storage | Test local and S3 storage round trips and cleanup | CF-001 | Upload/read/delete tests pass; failed jobs clean temporary files safely | IN PROGRESS — local round-trip/delete/range tests and mocked interrupted S3 cache-download tests added in PR #18; live S3 round trip and worker temp-file cleanup remain unverified |
+| CF-010 | P2 | Product | Verify subscription checkout/webhooks/entitlements | CF-008 | Paid plan entitlements are server-side and tested against Stripe events | NOT_STARTED |
+| CF-011 | P2 | QA | Full pipeline integration fixture and failure matrix | CF-003, CF-006 | Invalid URL, corrupt media, no audio, provider failure, cancellation and retries tested | NOT_STARTED |
+
+## Execution order
+CF-001 baseline is recorded; see `TEST_AND_FAILURE_LOG.md` for failures that keep the product baseline from being green. CF-002 still needs a safe worker runtime and deployment context. CF-005 is complete at focused unit-test and contract-review level; it has no commit and no end-to-end verification. The unowned CF-007 patch must not be integrated until its author claims ownership and provides a migration plan. Do not mark a task complete until evidence is appended to TEST_AND_FAILURE_LOG.md.
+
+| CF-012 | P1 | AI | Add transcript-independent multimodal event candidate proposals | CF-001 | Unit tests pass; candidates have bounded times, evidence provenance, and merge into /v1/analyze without invented semantic categories | IN REVIEW — PR #18; CI passed on head d5f9ec6 |
+
+| CF-013 | P1 | AI | Add deterministic temporal multimodal reranking | CF-012 | Ranked candidates include evidence diagnostics, preserve silent/visual candidates, and pass focused ranking tests | IN REVIEW — PR #18; CI pending |
+
+
+| CF-014 | P1 | AI/QA | Add reproducible labelled cross-genre ranking benchmark | CF-012, CF-013 | Validated manifest, per-video metrics, genre means, and test coverage; no synthetic labels treated as evidence | IMPLEMENTED IN PR #18; CI passed on head d5f9ec6; real labelled dataset still missing |
+
+
+| CF-015 | P0 | AI | Make optional media-analysis stages bounded and fault-isolated | CF-012 | Missing files and FFmpeg timeouts degrade gracefully; failed windows never invent energy; scene evidence reaches reranker | IMPLEMENTED IN PR #18; latest CI pending |
+
+
+## Storage follow-up — 2026-10-14
+CF-009 remains in progress, not complete. PR #18 now adds atomic local-cache downloads from S3, cleanup of partial upload/download files, idempotent local deletion plus S3 object deletion, cross-platform path validation, and explicit object-store client cleanup. New regression tests cover interrupted streams and local byte-range reads. Current latest-head CI has not yet completed; live S3 credentials/bucket and worker end-to-end cleanup have not been tested.

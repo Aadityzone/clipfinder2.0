@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+from ..highlights import normalize_segments
+
 @dataclass
 class StorySignals:
     hook: float
@@ -110,6 +112,9 @@ def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, 
     return max(0, start), end
 
 def optimize_candidates(segments: list[dict], candidates: list[dict]) -> list[dict]:
+    segments = normalize_segments(segments)
+    if not segments or not candidates:
+        return []
     enriched = []
     for candidate in candidates:
         anchor = min(

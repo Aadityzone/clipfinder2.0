@@ -1,5 +1,6 @@
 import { db } from "../../../lib/db";
 import { checkStorageHealth } from "../../../lib/storage";
+import { hasHealthyWorker } from "../../../lib/worker-heartbeat";
 
 export const dynamic = "force-dynamic";
 
@@ -38,16 +39,25 @@ async function checkStorage(): Promise<CheckStatus> {
   }
 }
 
+async function checkWorker(): Promise<CheckStatus> {
+  try {
+    return await hasHealthyWorker(db) ? "ok" : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
 export async function GET() {
-  const [database, ai, storage] = await Promise.all([
+  const [database, ai, storage, worker] = await Promise.all([
     checkDatabase(),
     checkAiService(),
     checkStorage(),
+    checkWorker(),
   ]);
-  const ok = database === "ok" && ai === "ok" && storage === "ok";
+  const ok = database === "ok" && ai === "ok" && storage === "ok" && worker === "ok";
 
   return Response.json(
-    { ok, service: "web", checks: { database, ai, storage } },
+    { ok, service: "web", checks: { database, ai, storage, worker } },
     { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } },
   );
 }

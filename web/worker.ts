@@ -1,7 +1,26 @@
-import {db} from "./lib/db";import {loadCreatorFeedbackProfile} from "./lib/creator-feedback";import {claimNextJob,finishJob,failJob,assertJobNotCancelled,completeJobAndEnqueue} from "./lib/jobs";import path from "node:path";import{ensureLocalStorage,putFile}from"./lib/storage";import{downloadGoogleDrive}from"./lib/sources/google-drive";import{publishYouTube}from"./lib/publish/youtube";import{publishTikTok,tiktokPublishStatus}from"./lib/publish/tiktok";
+import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
+import { db } from "./lib/db";
+import { loadCreatorFeedbackProfile } from "./lib/creator-feedback";
+import { ACTIVE_JOB_STATUSES, claimNextJob, finishJob, failJob, assertJobNotCancelled, completeJobAndEnqueue } from "./lib/jobs";
+import { pruneWorkerHeartbeats, recordWorkerHeartbeat, WORKER_HEARTBEAT_INTERVAL_MS } from "./lib/worker-heartbeat";
+import path from "node:path";
+import { ensureLocalStorage, putFile } from "./lib/storage";
+import { downloadGoogleDrive } from "./lib/sources/google-drive";
+import { publishYouTube } from "./lib/publish/youtube";
+import { publishTikTok, tiktokPublishStatus } from "./lib/publish/tiktok";
+
+const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
+let shutdownRequested = false;
+let heartbeatWritePending = false;
 const sleep=(n:number)=>new Promise(r=>setTimeout(r,n));const AI=process.env.AI_SERVICE_URL||"http://127.0.0.1:8000";
-async function setJobProgress(id:string,progress:number,status?:"DOWNLOADING"|"INGESTING"|"TRANSCRIBING"|"ANALYZING"|"RENDERING"){await db.job.updateMany({where:{id,status:{notIn:["CANCELLED","READY","FAILED"]}},data:{progress,...(status?{status}:{})}})}
+async function setJobProgress(id:string,progress:number,status?:"DOWNLOADING"|"INGESTING"|"TRANSCRIBING"|"ANALYZING"|"RENDERING"){await db.job.updateMany({where:{id,status:{in:ACTIVE_JOB_STATUSES}},data:{progress,...(status?{status}:{})}})}
 async function ai(pathname:string,body:unknown){const r=await fetch(AI+pathname,{method:"POST",headers:{"content-type":"application/json",...(process.env.AI_SERVICE_SECRET?{"x-ai-secret":process.env.AI_SERVICE_SECRET}:{})},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
+async function refreshWorkerHeartbeat(){
+  if(heartbeatWritePending)return;
+  heartbeatWritePending=true;
+  try{await recordWorkerHeartbeat(db,workerId)}catch(error){console.error("[worker] process heartbeat failed",error)}finally{heartbeatWritePending=false}
+}
 async function queueDuePosts(){const due=await db.scheduledPost.findMany({where:{status:"SCHEDULED",scheduledFor:{lte:new Date()}},take:10});for(const post of due){const changed=await db.scheduledPost.updateMany({where:{id:post.id,status:"SCHEDULED"},data:{status:"PUBLISHING",error:null}});if(changed.count)await db.job.create({data:{userId:post.userId,type:"PUBLISH",projectId:post.clipId?((await db.clip.findUnique({where:{id:post.clipId},select:{projectId:true}}))?.projectId):undefined,payload:{scheduledPostId:post.id}}})}}
 async function tick(){await queueDuePosts();const j=await claimNextJob();if(!j)return;const heartbeat=setInterval(()=>{void db.job.updateMany({where:{id:j.id,status:{in:["RETRYING","DOWNLOADING","INGESTING","TRANSCRIBING","ANALYZING","EDITING","RENDERING"]}},data:{startedAt:new Date()}}).catch(error=>console.error("[worker] heartbeat failed",error));},30_000);heartbeat.unref?.();try{await setJobProgress(j.id,.02);
  if(j.type==="PROJECT_READY"){await assertJobNotCancelled(j.id);await finishJob(j.id);return}
@@ -145,4 +164,20 @@ if(j.type==="LONGFORM_RENDER"){const p=j.payload as any;const doc=await db.longF
  throw new Error("Unknown job type: "+j.type)
 }catch(e){const message=e instanceof Error?e.message:String(e);const current=await db.job.findUnique({where:{id:j.id},select:{status:true}});if(current?.status==="CANCELLED")return;const failed=await failJob(j.id,message);if(failed?.status==="FAILED"){const p=j.payload as any;if(j.type==="PUBLISH"&&p?.scheduledPostId)await db.scheduledPost.update({where:{id:p.scheduledPostId},data:{status:"FAILED",error:message}}).catch(()=>{});if(j.type==="RENDER"&&p?.renderId)await db.render.update({where:{id:p.renderId},data:{status:"FAILED",error:message}}).catch(()=>{});if(j.type==="LONGFORM_RENDER"&&p?.documentId)await db.longFormDocument.update({where:{id:p.documentId},data:{renderStatus:"FAILED"}}).catch(()=>{});}}finally{clearInterval(heartbeat)}
 }
-async function main(){console.log("[worker] started");for(;;){await tick();await sleep(1000)}}main().catch(e=>{console.error(e);process.exit(1)});
+async function main(){
+  console.log(`[worker] started (${workerId})`);
+  await pruneWorkerHeartbeats(db).catch(error=>console.error("[worker] heartbeat cleanup failed",error));
+  await refreshWorkerHeartbeat();
+  const heartbeat=setInterval(()=>void refreshWorkerHeartbeat(),WORKER_HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref?.();
+  process.once("SIGINT",()=>{shutdownRequested=true});
+  process.once("SIGTERM",()=>{shutdownRequested=true});
+  try{
+    while(!shutdownRequested){await tick();if(!shutdownRequested)await sleep(1000)}
+  }finally{
+    clearInterval(heartbeat);
+    await db.workerHeartbeat.deleteMany({where:{workerId}}).catch(error=>console.error("[worker] heartbeat cleanup failed",error));
+    await db.$disconnect();
+  }
+}
+main().catch(e=>{console.error(e);process.exit(1)});

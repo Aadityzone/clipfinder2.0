@@ -1,10 +1,9 @@
 import { db } from "./db";
+import { ACTIVE_JOB_STATUSES, getFailureTransition } from "./job-state";
+export { ACTIVE_JOB_STATUSES, getFailureTransition } from "./job-state";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
-const ACTIVE_JOB_STATUSES: Array<"RETRYING" | "DOWNLOADING" | "INGESTING" | "TRANSCRIBING" | "ANALYZING" | "EDITING" | "RENDERING"> = [
-  "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING",
-];
 
 export async function enqueueJob(
   userId: string,
@@ -31,7 +30,7 @@ export async function claimNextJob() {
   await db.job.updateMany({
     where: {
       status: { in: ACTIVE_JOB_STATUSES },
-      startedAt: { lt: staleBefore },
+      OR: [{ startedAt: null }, { startedAt: { lt: staleBefore } }],
       attempts: { gte: MAX_ATTEMPTS },
     },
     data: {
@@ -48,7 +47,7 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: { in: ACTIVE_JOB_STATUSES }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: ACTIVE_JOB_STATUSES }, OR: [{ startedAt: null }, { startedAt: { lt: staleBefore } }], attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
@@ -78,7 +77,7 @@ export async function completeJobAndEnqueue(
 ) {
   return db.$transaction(async (tx) => {
     const completed = await tx.job.updateMany({
-      where: { id, status: { not: "CANCELLED" } },
+      where: { id, status: { in: ACTIVE_JOB_STATUSES } },
       data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
     });
     if (!completed.count) return null;
@@ -106,7 +105,7 @@ export async function assertJobNotCancelled(id: string) {
 
 export async function finishJob(id: string) {
   await db.job.updateMany({
-    where: { id, status: { not: "CANCELLED" } },
+    where: { id, status: { in: ACTIVE_JOB_STATUSES } },
     data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
   });
   return db.job.findUnique({ where: { id } });
@@ -120,13 +119,10 @@ export async function failJob(id: string, error: string) {
   const current = await db.job.findUnique({ where: { id } });
   if (!current || current.status === "CANCELLED" || current.status === "READY") return current;
 
-  const shouldRetry = current.attempts < MAX_ATTEMPTS;
-  const retryDelayMs = 15_000 * 2 ** Math.max(0, current.attempts - 1);
+  const transition = getFailureTransition(current.attempts);
   await db.job.updateMany({
-    where: { id, status: { notIn: ["CANCELLED", "READY"] } },
-    data: shouldRetry
-      ? { status: "QUEUED", error, finishedAt: null, runAfter: new Date(Date.now() + retryDelayMs) }
-      : { status: "FAILED", error, finishedAt: new Date(), runAfter: null },
+    where: { id, status: { in: ACTIVE_JOB_STATUSES } },
+    data: { ...transition, error },
   });
   return db.job.findUnique({ where: { id } });
 }

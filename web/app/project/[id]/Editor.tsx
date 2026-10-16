@@ -134,13 +134,19 @@ export default function Editor({
 
   const trimIn = () => {
     if (!current) return;
-    const next = { ...current, startS: Math.min(time, current.endS - 0.1) };
+    const minimum = segments[selectedSegment - 1]?.endS ?? 0;
+    const maximum = current.endS - 0.1;
+    if (minimum > maximum) return;
+    const next = { ...current, startS: Math.max(minimum, Math.min(time, maximum)) };
     push(segments.map((s, i) => (i === selectedSegment ? next : s)));
   };
 
   const trimOut = () => {
     if (!current) return;
-    const next = { ...current, endS: Math.max(time, current.startS + 0.1) };
+    const minimum = current.startS + 0.1;
+    const maximum = segments[selectedSegment + 1]?.startS ?? duration;
+    if (minimum > maximum) return;
+    const next = { ...current, endS: Math.min(maximum, Math.max(time, minimum)) };
     push(segments.map((s, i) => (i === selectedSegment ? next : s)));
   };
 
@@ -199,7 +205,7 @@ export default function Editor({
   });
 
   const save = useCallback(async () => {
-    if (!selected || !segments.length) return;
+    if (!selected || !segments.length) return false;
     setSaving(true);
     setMessage("");
 
@@ -220,8 +226,10 @@ export default function Editor({
       if (!r.ok) throw new Error(d.error ?? "Save failed");
       setSelected((c) => (c ? { ...c, startS: first.startS, endS: last.endS, edit: d } : c));
       setMessage("Saved");
+      return true;
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Save failed");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -273,12 +281,12 @@ export default function Editor({
       setMessage(d.error ?? "Export failed");
       return;
     }
-    window.open(d.url, "_blank", "noopener,noreferrer");
+    window.location.assign(d.url);
   };
 
   const render = async () => {
     if (!selected) return;
-    await save();
+    if (!(await save())) return;
     setRendering(true);
     setMessage("");
 

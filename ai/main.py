@@ -4,7 +4,7 @@ from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe
 from .services.download import download
 from .services.media import ffprobe
-from .services.render import render
+from .services.render import render, validate_render_output, validate_segments
 from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
@@ -17,6 +17,8 @@ from .services.diarization import diarize, diarization_status
 from .services.visual_intelligence import semantic_frame_scores, visual_capabilities
 from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
+from .services.event_candidates import generate_event_candidates
+from .services.temporal_ranking import rank_candidates
 import hmac
 import os
 import uuid
@@ -125,13 +127,17 @@ def probe(b: ProbeRequest, x_ai_secret: str | None = Header(default=None)):
 def thumbnail(b: ThumbnailRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
-        os.makedirs(os.path.dirname(b.output_path), exist_ok=True)
+        if not os.path.isfile(b.input_path):
+            raise HTTPException(status_code=404, detail="Media file not found")
+        os.makedirs(os.path.dirname(b.output_path) or ".", exist_ok=True)
         import subprocess
         subprocess.run(["ffmpeg", "-y", "-ss", str(max(0, b.time)), "-i", b.input_path,
-                        "-frames:v", "1", "-q:v", "2", b.output_path], check=True)
-        if not os.path.isfile(b.output_path):
-            raise RuntimeError("Thumbnail was not created")
+                        "-frames:v", "1", "-q:v", "2", b.output_path], check=True, timeout=300)
+        if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 256:
+            raise RuntimeError("Thumbnail output was not created or is empty")
         return {"output_path": b.output_path}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -155,11 +161,36 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     media = analyze_media(b.media_path) if b.media_path else {}
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
-        media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
+        try:
+            media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
+            media["visualSemanticStatus"] = {"available": True}
+        except Exception as exc:
+            # Semantic frame scoring is optional; its failure must not discard
+            # transcript candidates or other media evidence.
+            media["visualSemantic"] = []
+            media["visualSemanticStatus"] = {
+                "available": False,
+                "reason": type(exc).__name__,
+            }
     result = candidates(b.segments, b.instruction, b.categories, media)
     result = enrich_semantics(result, b.instruction)
-    result = optimize_candidates(b.segments, result)
-    diarized = diarize(b.media_path, b.segments) if b.media_path else {"available": False, "segments": []}
+    if b.segments:
+        result = optimize_candidates(b.segments, result)
+
+    # Transcript-first candidates can miss gameplay, visual events, or loud
+    # reactions when speech is sparse. Add independent event candidates without
+    # fabricating semantic labels; deduplication below collapses overlapping windows.
+    event_result = generate_event_candidates(media, b.instruction, b.categories)
+    for event in event_result:
+        event["text"] = " ".join(
+            str(segment.get("text", "")).strip()
+            for segment in b.segments
+            if float(segment.get("end", 0)) > event["start"]
+            and float(segment.get("start", 0)) < event["end"]
+        ).strip()
+    result.extend(event_result)
+
+    diarized = diarize(b.media_path, b.segments) if b.media_path and b.segments else {"available": False, "segments": []}
     analysis_segments = diarized.get("segments") or b.segments
     speaker = speaker_signals(analysis_segments)
     for candidate in result:
@@ -187,6 +218,11 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
             }
             if len(counts) >= 2:
                 candidate["score"] = round(min(100, float(candidate.get("score", 0)) + min(5, 2 + turns * 0.75)), 2)
+    # Deterministic multimodal ranking keeps upstream/LLM scores dominant while
+    # using available story, transcript, and media evidence as a bounded signal.
+    result = rank_candidates(result)
+    # Creator preferences are applied after the general ranker so personal taste
+    # can adjust ordering without rewriting the general-purpose evidence record.
     result = apply_creator_preferences(result, b.creator_preferences)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
     return {"candidates": result[:50]}
@@ -202,10 +238,29 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
 def render_route(b: RenderRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     try:
-        render(b.input_path, b.output_path, b.start, b.end, b.aspect, b.segments,
+        source = ffprobe(b.input_path)
+        source_duration = float(source.get("duration") or 0)
+        if source_duration <= 0 or not source.get("width") or not source.get("height"):
+            raise HTTPException(status_code=400, detail="Input media must contain a valid video stream.")
+
+        segments = b.segments if b.segments is not None else [{"start": b.start, "end": b.end}]
+        try:
+            normalized, expected_duration = validate_segments(segments, source_duration)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        render(b.input_path, b.output_path, b.start, b.end, b.aspect, normalized,
                b.captions, b.caption_style, b.focus_x)
-        if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 1024:
-            raise RuntimeError("Render output was not created or is invalid")
-        return {"output_path": b.output_path, "size": os.path.getsize(b.output_path)}
+        if not os.path.isfile(b.output_path):
+            raise RuntimeError("Render output was not created")
+        size = os.path.getsize(b.output_path)
+        output = ffprobe(b.output_path)
+        try:
+            validate_render_output(output, size, expected_duration)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return {"output_path": b.output_path, "size": size,
+                "duration": output["duration"], "width": output["width"], "height": output["height"]}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

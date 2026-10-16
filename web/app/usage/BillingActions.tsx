@@ -1,4 +1,73 @@
-"use client";import{useState}from"react";
-export default function BillingActions({hasCustomer}:{hasCustomer:boolean}){const[busy,setBusy]=useState(false);const[error,setError]=useState("");
-async function go(endpoint:string){setBusy(true);setError("");try{const r=await fetch(endpoint,{method:"POST"});const d=await r.json();if(!r.ok)throw new Error(d.error||"Billing request failed");if(d.url)location.href=d.url}catch(e){setError(e instanceof Error?e.message:"Billing unavailable")}finally{setBusy(false)}}
-return <div className="mt-8 rounded-3xl border border-white/10 p-6"><h2 className="text-lg font-semibold">Billing</h2><p className="mt-2 text-sm text-zinc-500">Subscription changes are handled by Stripe. Clip Finder only updates plan state after Stripe confirms it.</p><div className="mt-5 flex flex-wrap gap-3"><button disabled={busy} onClick={()=>go("/api/billing/checkout")} className="rounded-xl bg-lime-300 px-5 py-3 text-sm font-semibold text-black disabled:opacity-50">{busy?"Opening…":"Upgrade to Pro"}</button>{hasCustomer&&<button disabled={busy} onClick={()=>go("/api/billing/portal")} className="rounded-xl border border-white/10 px-5 py-3 text-sm disabled:opacity-50">Manage subscription</button>}</div>{error&&<p className="mt-3 text-sm text-red-400">{error}</p>}</div>}
+"use client";
+
+import { useState } from "react";
+
+type BillingResponse = { url?: string; error?: string };
+
+async function readResponse(response: Response): Promise<BillingResponse> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("The billing service returned an unexpected response.");
+  }
+
+  try {
+    return (await response.json()) as BillingResponse;
+  } catch {
+    throw new Error("The billing service returned an empty response.");
+  }
+}
+
+export default function BillingActions({ hasCustomer }: { hasCustomer: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function openBilling(endpoint: string) {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await fetch(endpoint, { method: "POST" });
+      const data = await readResponse(response);
+      if (!response.ok) throw new Error(data.error || "Billing request failed.");
+      if (!data.url) throw new Error("The billing service did not return a secure destination.");
+      window.location.assign(data.url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Billing is unavailable. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-6">
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          disabled={busy}
+          aria-busy={busy}
+          onClick={() => void openBilling("/api/billing/checkout")}
+          className="cf-button cf-button-primary disabled:cursor-wait disabled:opacity-55"
+        >
+          {busy ? "Opening secure checkout…" : "Upgrade to Pro"}
+        </button>
+        {hasCustomer && (
+          <button
+            type="button"
+            disabled={busy}
+            aria-busy={busy}
+            onClick={() => void openBilling("/api/billing/portal")}
+            className="cf-button cf-button-secondary disabled:cursor-wait disabled:opacity-55"
+          >
+            Manage subscription
+          </button>
+        )}
+      </div>
+      {error && (
+        <p role="alert" aria-live="assertive" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[.07] p-3 text-xs leading-5 text-rose-300">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}

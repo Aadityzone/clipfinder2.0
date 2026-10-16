@@ -1,3 +1,4 @@
+import math
 import re
 
 CUES = {
@@ -13,6 +14,38 @@ ALIASES = {"ai detect": "ai_detect", "fail/win": "fail / win"}
 
 def _words(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
+
+def _finite_number(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+def normalize_segments(segments, duration=None):
+    """Return transcript segments with finite, ordered, in-media timestamps."""
+    duration = _finite_number(duration)
+    if duration is not None and duration <= 0:
+        duration = None
+    normalized = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        start = _finite_number(segment.get("start"))
+        end = _finite_number(segment.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        start = max(0.0, start)
+        end = min(end, duration) if duration is not None else end
+        if end <= start:
+            continue
+        clean = dict(segment)
+        clean["start"], clean["end"] = start, end
+        normalized.append(clean)
+    normalized.sort(key=lambda segment: (segment["start"], segment["end"]))
+    return normalized
 
 def score(text: str, start: float, end: float, instruction: str | None = None):
     words = _words(text)
@@ -37,6 +70,21 @@ def _window_text(segments, start, end):
 def candidates(segments, instruction=None, categories=None, media=None):
     allowed = {ALIASES.get(str(c).lower(), str(c).lower()) for c in (categories or ["ai_detect"])}
     media = media or {}
+    duration = _finite_number(media.get("durationS"))
+    if duration is None or duration <= 0:
+        audio = media.get("audio")
+        duration = _finite_number(audio.get("durationS")) if isinstance(audio, dict) else None
+    if duration is not None and duration <= 0:
+        duration = None
+
+    # Normalize input once so malformed and non-finite transcript times do
+    # not leak into candidate windows or downstream persistence.
+    normalized_segments = normalize_segments(segments, duration)
+    if not normalized_segments:
+        return []
+    boundary = duration if duration is not None else max(
+        segment["end"] for segment in normalized_segments
+    )
     faces = media.get("vision", {}).get("faces", [])
     scenes = media.get("scenes", {}).get("sceneChanges", [])
     audio = media.get("audioWindows", [])
@@ -44,14 +92,14 @@ def candidates(segments, instruction=None, categories=None, media=None):
     on_screen = media.get("onScreen", {}).get("samples", [])
     semantic = media.get("visualSemantic", [])
     out = []
-    for idx, s in enumerate(segments):
-        raw_start, raw_end = float(s["start"]), float(s["end"])
-        if raw_end <= raw_start:
-            continue
+    for idx, s in enumerate(normalized_segments):
+        raw_start, raw_end = s["start"], s["end"]
         # Expand around a transcript segment so the model sees setup + payoff.
         start = max(0.0, raw_start - 4.0)
-        end = raw_end + 6.0
-        text = _window_text(segments, start, end)
+        end = min(boundary, raw_end + 6.0)
+        if end <= start:
+            continue
+        text = _window_text(normalized_segments, start, end)
         if len(text) < 28:
             continue
         low = text.lower()

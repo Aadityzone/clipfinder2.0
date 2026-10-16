@@ -9,7 +9,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { putFile } from "../../../../../lib/storage";
 
-const exec = promisify(exec);
+const exec = promisify(execFile);
 export const runtime = "nodejs";
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {

@@ -171,6 +171,11 @@ model Job {
   user User @relation(fields:[userId],references:[id],onDelete:Cascade)
   project Project? @relation(fields:[projectId],references:[id],onDelete:Cascade)
 }
+model WorkerHeartbeat {
+  workerId String @id
+  startedAt DateTime @default(now())
+  heartbeatAt DateTime @default(now())
+}
 model Analysis {
   id String @id @default(cuid())
   projectId String
