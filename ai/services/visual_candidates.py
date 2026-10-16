@@ -66,7 +66,7 @@ def multimodal_event_candidates(
     events: list[dict] = []
     for row in visual_samples:
         time = _number(row.get("time"), -1)
-        if time < 0:
+        if time < 0 or (duration_value > 0 and time > duration_value):
             continue
         change = max(0.0, min(1.0, _number(row.get("visualChange"))))
         motion = max(0.0, min(1.0, _number(row.get("motion"))))
@@ -77,27 +77,27 @@ def multimodal_event_candidates(
 
     for row in audio_windows:
         time = _number(row.get("start"), -1)
-        if time < 0:
+        if time < 0 or (duration_value > 0 and time > duration_value):
             continue
         energy = max(0.0, min(1.0, _number(row.get("energy"))))
         peak_db = _number(row.get("peakDb"), -120.0)
         # Energy is normalized by the audio analyzer; a peak adds confidence.
         peak_strength = max(0.0, min(1.0, (peak_db + 24.0) / 24.0))
         strength = max(energy, peak_strength)
-        if strength >= min_event_strength:
+        if strength >= threshold:
             events.append({"time": time, "strength": strength, "kind": "audio_peak",
                            "evidence": {"audioEnergy": energy, "audioPeakDb": peak_db}})
 
     for time_value in scenes:
         time = _number(time_value, -1)
-        if time >= 0:
+        if time >= 0 and (duration_value <= 0 or time <= duration_value):
             events.append({"time": time, "strength": 0.62, "kind": "scene_change",
                            "evidence": {"sceneChange": True}})
 
     for row in screen_samples:
         time = _number(row.get("time"), -1)
         labels = list(row.get("actionLabels") or [])
-        if time >= 0 and labels:
+        if time >= 0 and labels and (duration_value <= 0 or time <= duration_value):
             events.append({"time": time, "strength": 0.72, "kind": "on_screen_action",
                            "evidence": {"onScreenActionLabels": sorted(set(map(str, labels))),
                                         "onScreenText": str(row.get("ocrText") or "")[:500]}})

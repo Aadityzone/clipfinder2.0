@@ -67,3 +67,32 @@ def test_events_after_source_duration_are_ignored():
         duration=30,
     )
     assert result == []
+
+
+
+def test_audio_threshold_uses_configured_event_strength():
+    media = {"audioWindows": [
+        {"start": 5, "end": 6, "energy": 0.65, "peakDb": -120},
+        {"start": 20, "end": 21, "energy": 0.9, "peakDb": -120},
+    ]}
+    result = multimodal_event_candidates(
+        [], media, duration=40, min_event_strength=0.8
+    )
+    assert len(result) == 1
+    assert result[0]["start"] == 8
+    assert result[0]["features"]["eventKind"] == "audio_peak"
+
+
+def test_out_of_range_strong_events_do_not_displace_valid_candidates():
+    media = {
+        "visual": {"samples": [
+            {"time": 1000, "visualChange": 1.0, "motion": 1.0},
+            {"time": 20, "visualChange": 0.9, "motion": 0.2},
+        ]}
+    }
+    result = multimodal_event_candidates(
+        [], media, duration=30, max_candidates=1
+    )
+    assert len(result) == 1
+    assert result[0]["start"] == 8
+    assert result[0]["end"] == 30
