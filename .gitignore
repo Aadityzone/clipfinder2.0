@@ -37,3 +37,6 @@ web/generated/prisma/
 .idea/
 .DS_Store
 Thumbs.db
+
+# pytest scratch artifacts accidentally created at repository root
+.tmp-pytest-*/
