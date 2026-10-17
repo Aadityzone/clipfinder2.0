@@ -59,6 +59,15 @@ ALIASES = {
 VALID_GENRES = ("auto", "general", *GENRE_CUES.keys())
 
 
+def _finite_number(value: object, fallback: float = 0.0) -> float:
+    """Parse untrusted feature values without letting malformed model output crash ranking."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return number if number == number and abs(number) != float("inf") else fallback
+
+
 def normalize_genre(genre: str | None) -> str:
     value = re.sub(r"[_-]+", " ", (genre or "auto").strip().lower())
     value = ALIASES.get(value, value.replace(" ", "_"))
@@ -96,23 +105,32 @@ def apply_genre_profile(
     requested = normalize_genre(requested_genre)
     inferred, transcript_scores = infer_genre(transcript)
     active = inferred if requested == "auto" else requested
+    safe_candidates = [candidate for candidate in candidates if isinstance(candidate, dict)]
     if active == "general":
-        for candidate in candidates:
-            candidate.setdefault("features", {})["genreProfile"] = {
+        for candidate in safe_candidates:
+            features = candidate.get("features")
+            if not isinstance(features, dict):
+                features = {}
+                candidate["features"] = features
+            features["genreProfile"] = {
                 "requested": requested, "detected": inferred, "active": "general",
                 "cueMatches": 0,
             }
-        return candidates
+        return safe_candidates
 
     cues = GENRE_CUES[active]
-    for candidate in candidates:
+    for candidate in safe_candidates:
         text = str(candidate.get("text", ""))
         matches = _count_cues(text, cues)
-        features = candidate.setdefault("features", {})
+        features = candidate.get("features")
+        if not isinstance(features, dict):
+            features = {}
+            candidate["features"] = features
         action_labels = features.get("onScreenActionLabels", [])
-        gameplay_ratio = float(features.get("gameplayLikeRatio") or 0)
-        visual_change = float(features.get("visualChange") or 0)
-        motion = float(features.get("motion") or 0)
+        action_labels = action_labels if isinstance(action_labels, list) else []
+        gameplay_ratio = _finite_number(features.get("gameplayLikeRatio"))
+        visual_change = _finite_number(features.get("visualChange"))
+        motion = _finite_number(features.get("motion"))
 
         # Only a small bonus: transcript/media heuristics must not dominate ranking.
         bonus = min(8.0, matches * 1.5)
@@ -122,24 +140,26 @@ def apply_genre_profile(
             if any(label in {"combat", "victory", "failure"} for label in action_labels):
                 bonus += 1.5
         elif active == "irl_stream":
-            bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
-            bonus += min(1.0, float(features.get("audioEnergy") or 0))
+            bonus += min(1.5, _finite_number(features.get("faceHits")) * 0.25)
+            bonus += min(1.0, _finite_number(features.get("audioEnergy")))
         elif active == "podcast":
-            bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
-            speakers = features.get("speakers") or {}
-            bonus += min(2.0, float(speakers.get("turnCount") or 0) * 0.4)
+            bonus += min(1.5, _finite_number(features.get("faceHits")) * 0.25)
+            speakers = features.get("speakers")
+            speakers = speakers if isinstance(speakers, dict) else {}
+            bonus += min(2.0, _finite_number(speakers.get("turnCount")) * 0.4)
         elif active in {"movies_tv", "anime"}:
             bonus += min(2.0, visual_change * 1.5 + motion)
-            bonus += min(1.0, float(features.get("sceneHits") or 0) * 0.2)
+            bonus += min(1.0, _finite_number(features.get("sceneHits")) * 0.2)
         elif active == "tech":
-            bonus += min(1.5, float(features.get("sceneHits") or 0) * 0.25)
+            bonus += min(1.5, _finite_number(features.get("sceneHits")) * 0.25)
             bonus += min(1.0, len(str(features.get("onScreenText") or "")) / 300)
         elif active in {"knowledge", "facts"}:
-            story = features.get("story") or {}
-            bonus += min(2.0, float(story.get("completeness") or 0) * 2)
-            bonus += min(1.0, float(story.get("payoff") or 0))
+            story = features.get("story")
+            story = story if isinstance(story, dict) else {}
+            bonus += min(2.0, _finite_number(story.get("completeness")) * 2)
+            bonus += min(1.0, _finite_number(story.get("payoff")))
         bonus = min(12.0, bonus)
-        candidate["score"] = round(min(100.0, float(candidate.get("score", 0)) + bonus), 2)
+        candidate["score"] = round(max(0.0, min(100.0, _finite_number(candidate.get("score")) + bonus)), 2)
         features["genreProfile"] = {
             "requested": requested,
             "detected": inferred,
