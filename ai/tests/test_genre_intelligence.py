@@ -108,3 +108,35 @@ def test_every_explicit_genre_profile_uses_its_own_transcript_evidence():
         assert profile["cueMatches"] > 0
         assert result[0]["score"] > 50
 
+
+
+
+def test_genre_profile_ignores_malformed_optional_feature_values():
+    candidates = [
+        {
+            "text": "A clutch victory in the final round.",
+            "score": "not-a-score",
+            "features": {
+                "onScreenActionLabels": "not-a-list",
+                "gameplayLikeRatio": "nan",
+                "visualChange": object(),
+                "motion": None,
+            },
+        },
+        {"text": "A second victory.", "score": 50, "features": []},
+        None,
+    ]
+
+    result = apply_genre_profile(candidates, "A gaming stream with a clutch victory.", "gaming")
+
+    assert len(result) == 2
+    assert result[0]["score"] >= 0
+    assert result[0]["score"] <= 100
+    assert result[0]["features"]["genreProfile"]["active"] == "gaming"
+    assert result[1]["features"]["genreProfile"]["active"] == "gaming"
+
+
+def test_general_genre_repairs_non_dictionary_features():
+    candidate = {"text": "Hello there", "score": 20, "features": None}
+    result = apply_genre_profile([candidate], "Hello there", "general")
+    assert result[0]["features"]["genreProfile"]["active"] == "general"
