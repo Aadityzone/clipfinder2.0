@@ -13,6 +13,15 @@ def test_window_text_skips_malformed_transcript_rows():
     assert _window_text(segments, 0, 4) == "valid transcript words"
 
 
+def test_window_text_restores_chronological_order_for_unsorted_transcript_rows():
+    segments = [
+        {"start": 8, "end": 10, "text": "the payoff"},
+        {"start": 2, "end": 4, "text": "the setup"},
+        {"start": 5, "end": 7, "text": "then the turn"},
+    ]
+    assert _window_text(segments, 0, 12) == "the setup then the turn the payoff"
+
+
 def test_candidates_ignore_invalid_transcript_and_media_rows():
     segments = [
         None,

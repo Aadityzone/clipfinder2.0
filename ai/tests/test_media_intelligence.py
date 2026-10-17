@@ -36,3 +36,23 @@ def test_scene_detection_failure_degrades_without_failing_analysis(monkeypatch, 
 
     assert media_intelligence.scene_features(str(media)) == {}
 
+
+def test_missing_opencv_cascade_api_degrades_without_failing_analysis(monkeypatch, tmp_path):
+    import cv2
+
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"source")
+    monkeypatch.setattr(cv2, "CascadeClassifier", None, raising=False)
+    monkeypatch.setattr(media_intelligence, "audio_features", lambda _path: ({}, []))
+    monkeypatch.setattr(media_intelligence, "scene_features", lambda _path: {})
+    monkeypatch.setattr(media_intelligence, "sample_visual_features", lambda _path: {})
+    monkeypatch.setattr(media_intelligence, "analyze_on_screen", lambda _path: {})
+
+    result = media_intelligence.analyze_media(str(media))
+
+    assert result["vision"] == {
+        "available": False,
+        "faces": [],
+        "reason": "cascade_classifier_unavailable",
+    }
+

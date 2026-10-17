@@ -2,13 +2,15 @@ import { db } from "./db";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
-const ACTIVE_JOB_STATUSES: Array<"RETRYING" | "DOWNLOADING" | "INGESTING" | "TRANSCRIBING" | "ANALYZING" | "EDITING" | "RENDERING"> = [
+const ACTIVE_JOB_STATUSES = [
   "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING",
-];
+] as const;
+const TERMINAL_JOB_STATUSES = ["READY", "FAILED", "CANCELLED"] as const;
+const MAX_ERROR_LENGTH = 4000;
 
 export async function enqueueJob(
   userId: string,
-  projectId: string,
+  projectId: string | null,
   type: string,
   payload: unknown = {},
   runAfter?: Date,
@@ -19,19 +21,18 @@ export async function enqueueJob(
 }
 
 /**
- * Atomically claim one runnable job. Heartbeats refresh startedAt while a worker
- * is active; stale jobs in any active processing stage can be recovered after a crash.
+ * A stale active job has either lost its heartbeat or predates heartbeat support.
+ * The updateMany compare-and-set below lets multiple worker processes race safely:
+ * only the process that sees the original runnable state claims it.
  */
-export async function claimNextJob() {
+export async function claimNextJob(client: typeof db = db) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
-  // A worker can disappear without reaching failJob (process kill, host
-  // restart, or power loss). Recover stale work, but do not retry a crashed
-  // job forever: the same three-attempt ceiling applies to crash recovery.
-  await db.job.updateMany({
+  const staleLease = { OR: [{ startedAt: null }, { startedAt: { lt: staleBefore } }] };
+  await client.job.updateMany({
     where: {
-      status: { in: ACTIVE_JOB_STATUSES },
-      startedAt: { lt: staleBefore },
+      status: { in: [...ACTIVE_JOB_STATUSES] },
+      ...staleLease,
       attempts: { gte: MAX_ATTEMPTS },
     },
     data: {
@@ -48,16 +49,16 @@ export async function claimNextJob() {
       {
         OR: [
           { status: "QUEUED" as const },
-          { status: { in: ACTIVE_JOB_STATUSES }, startedAt: { lt: staleBefore }, attempts: { lt: MAX_ATTEMPTS } },
+          { status: { in: [...ACTIVE_JOB_STATUSES] }, ...staleLease, attempts: { lt: MAX_ATTEMPTS } },
         ],
       },
       runnable,
     ],
   };
-  const candidate = await db.job.findFirst({ where: claimable, orderBy: { createdAt: "asc" } });
+  const candidate = await client.job.findFirst({ where: claimable, orderBy: { createdAt: "asc" } });
   if (!candidate) return null;
 
-  const claimed = await db.job.updateMany({
+  const claimed = await client.job.updateMany({
     where: { AND: [{ id: candidate.id }, ...claimable.AND] },
     data: {
       status: "RETRYING",
@@ -68,18 +69,19 @@ export async function claimNextJob() {
       runAfter: null,
     },
   });
-  return claimed.count ? db.job.findUnique({ where: { id: candidate.id } }) : null;
+  return claimed.count ? client.job.findUnique({ where: { id: candidate.id } }) : null;
 }
 
-/** Atomically finish a stage and enqueue its successor to prevent pipeline gaps. */
+/** Mark a stage complete and enqueue its successor in one database transaction. */
 export async function completeJobAndEnqueue(
   id: string,
-  next: { userId: string; projectId: string | null; type: string; payload: unknown },
+  next: { userId: string; projectId: string | null; type: string; payload: unknown; expectedAttempts?: number; runAfter?: Date },
+  client: typeof db = db,
 ) {
-  return db.$transaction(async (tx) => {
+  return client.$transaction(async (tx) => {
     const completed = await tx.job.updateMany({
-      where: { id, status: { not: "CANCELLED" } },
-      data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
+      where: { id, status: { in: [...ACTIVE_JOB_STATUSES] }, ...(next.expectedAttempts === undefined ? {} : { attempts: next.expectedAttempts }) },
+      data: { status: "READY", progress: 1, finishedAt: new Date(), runAfter: null, error: null },
     });
     if (!completed.count) return null;
     return tx.job.create({
@@ -89,44 +91,58 @@ export async function completeJobAndEnqueue(
         type: next.type,
         payload: next.payload as any,
         status: "QUEUED",
+        runAfter: next.runAfter,
       },
     });
   });
 }
 
 /** Throw at worker checkpoints so cancellation is not overwritten by completion. */
-export async function assertJobNotCancelled(id: string) {
-  const job = await db.job.findUnique({ where: { id }, select: { status: true } });
-  if (!job || job.status === "CANCELLED") {
-    const error = new Error("JOB_CANCELLED");
-    error.name = "JobCancelledError";
+export async function assertJobNotCancelled(id: string, expectedAttempts?: number) {
+  const job = await db.job.findUnique({ where: { id }, select: { status: true, attempts: true } });
+  if (!job || job.status === "CANCELLED" || (expectedAttempts !== undefined && job.attempts !== expectedAttempts)) {
+    const cancelled = !job || job.status === "CANCELLED";
+    const error = new Error(cancelled ? "JOB_CANCELLED" : "JOB_LEASE_LOST");
+    error.name = cancelled ? "JobCancelledError" : "JobLeaseLostError";
     throw error;
   }
 }
 
-export async function finishJob(id: string) {
-  await db.job.updateMany({
-    where: { id, status: { not: "CANCELLED" } },
-    data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
+/** Idempotently finish a claimed job; never resurrect queued or failed work. */
+export async function finishJob(id: string, client: typeof db = db, expectedAttempts?: number) {
+  const current = await client.job.findUnique({ where: { id } });
+  if (!current || current.status === "CANCELLED" || current.status === "READY") return current;
+  if (!(ACTIVE_JOB_STATUSES as readonly string[]).includes(current.status)) {
+    throw new Error(`Cannot complete job ${id} from state ${current.status}.`);
+  }
+  const changed = await client.job.updateMany({
+    where: { id, status: { in: [...ACTIVE_JOB_STATUSES] }, ...(expectedAttempts === undefined ? {} : { attempts: expectedAttempts }) },
+    data: { status: "READY", progress: 1, finishedAt: new Date(), runAfter: null, error: null },
   });
-  return db.job.findUnique({ where: { id } });
+  if (!changed.count) {
+    const latest = await client.job.findUnique({ where: { id } });
+    if (!latest || latest.status === "CANCELLED" || latest.status === "READY") return latest;
+    throw new Error(`Job ${id} changed state before completion (${latest.status}).`);
+  }
+  return client.job.findUnique({ where: { id } });
 }
 
-/**
- * Retry transient failures automatically with bounded exponential backoff.
- * The third failed attempt becomes terminal; the user can explicitly retry it.
- */
-export async function failJob(id: string, error: string) {
-  const current = await db.job.findUnique({ where: { id } });
-  if (!current || current.status === "CANCELLED" || current.status === "READY") return current;
+/** Retry transient failures with bounded exponential backoff and a compare-and-set. */
+export async function failJob(id: string, error: string, client: typeof db = db, expectedAttempts?: number) {
+  const current = await client.job.findUnique({ where: { id } });
+  if (!current || (TERMINAL_JOB_STATUSES as readonly string[]).includes(current.status)) return current;
+  if (!(ACTIVE_JOB_STATUSES as readonly string[]).includes(current.status)) return current;
+  if (expectedAttempts !== undefined && current.attempts !== expectedAttempts) return current;
 
+  const boundedError = error.slice(0, MAX_ERROR_LENGTH);
   const shouldRetry = current.attempts < MAX_ATTEMPTS;
   const retryDelayMs = 15_000 * 2 ** Math.max(0, current.attempts - 1);
-  await db.job.updateMany({
-    where: { id, status: { notIn: ["CANCELLED", "READY"] } },
+  const changed = await client.job.updateMany({
+    where: { id, status: current.status, attempts: expectedAttempts ?? current.attempts },
     data: shouldRetry
-      ? { status: "QUEUED", error, finishedAt: null, runAfter: new Date(Date.now() + retryDelayMs) }
-      : { status: "FAILED", error, finishedAt: new Date(), runAfter: null },
+      ? { status: "QUEUED", error: boundedError, finishedAt: null, runAfter: new Date(Date.now() + retryDelayMs) }
+      : { status: "FAILED", error: boundedError, finishedAt: new Date(), runAfter: null },
   });
-  return db.job.findUnique({ where: { id } });
+  if (!changed.count) return client.job.findUnique({ where: { id } });
+  return client.job.findUnique({ where: { id } });
 }

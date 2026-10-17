@@ -30,6 +30,21 @@ def test_parse_rankings_accepts_fenced_json_and_ignores_bad_indexes():
     }
 
 
+def test_parse_rankings_rejects_fractional_boolean_and_ambiguous_duplicate_indexes():
+    raw = json.dumps([
+        {"i": 0.9, "score": 99},
+        {"i": True, "score": 98},
+        {"i": "1.0", "score": 97},
+        {"i": 0, "score": 75, "rationale": "first valid row"},
+        {"i": 0, "score": 100, "rationale": "duplicate row"},
+    ])
+    assert llm._parse_rankings(raw) == {
+        0: {"score": 75.0, "rationale": "first valid row"}
+    }
+    assert llm._parse_rankings(None) == {}
+    assert llm._parse_rankings(json.dumps([{"i": "9" * 5000, "score": 90}])) == {}
+
+
 def test_score_candidates_uses_raw_responses_payload(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(llm, "urlopen", lambda *args, **kwargs: _FakeResponse({
@@ -168,6 +183,21 @@ def test_provider_failure_is_recorded_without_breaking_deterministic_scores(monk
         "provider": "openai",
         "status": "unavailable",
         "errorType": "TimeoutError",
+    }
+
+
+def test_provider_output_with_only_out_of_range_indexes_falls_back(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([{"i": 12, "score": 100, "rationale": "invalid index"}])
+    }))
+    candidates = [{"start": 1, "end": 8, "score": 63, "text": "A moment", "features": {}}]
+
+    result = llm.score_candidates(candidates, "A moment")
+
+    assert result[0]["score"] == 63
+    assert result[0]["features"]["llmRanking"] == {
+        "provider": "openai", "status": "unavailable", "errorType": "ValueError",
     }
 
 def test_model_title_is_parsed_and_attached_to_candidate(monkeypatch):

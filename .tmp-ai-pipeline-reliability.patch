@@ -1,0 +1,248 @@
+diff --git a/ai/services/llm.py b/ai/services/llm.py
+index eecb918..d936760 100644
+--- a/ai/services/llm.py
++++ b/ai/services/llm.py
+@@ -1,6 +1,8 @@
+ import base64
+ import json
++import math
+ import os
++import re
+ from urllib.request import Request, urlopen
+ 
+ 
+@@ -121,12 +123,22 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
+         if not isinstance(item, dict):
+             continue
+         index = item.get("i")
++        if isinstance(index, bool):
++            continue
++        if isinstance(index, int):
++            parsed_index = index
++        elif isinstance(index, str) and re.fullmatch(r"\d+", index.strip()):
++            parsed_index = int(index.strip())
++        else:
++            continue
++        raw_score = item.get("score")
++        if isinstance(raw_score, bool):
++            continue
+         try:
+-            index = int(index)
+-            score = float(item.get("score"))
++            score = float(raw_score)
+         except (TypeError, ValueError, OverflowError):
+             continue
+-        if index < 0 or not 0 <= score <= 100:
++        if parsed_index < 0 or not math.isfinite(score) or not 0 <= score <= 100:
+             continue
+         ranking = {
+             "score": score,
+@@ -135,7 +147,9 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
+         title = item.get("title")
+         if isinstance(title, str) and title.strip():
+             ranking["title"] = title.strip()[:120]
+-        ranked[index] = ranking
++        # Duplicate indices are ambiguous model output. Keep the first valid
++        # ranking so later repeated rows cannot silently overwrite it.
++        ranked.setdefault(parsed_index, ranking)
+     return ranked
+ 
+ 
+@@ -329,8 +343,9 @@ def score_candidates(
+ 
+             raw = _ollama_response_text(data) if provider == "ollama" else _response_text(data)
+             ranked = _parse_rankings(raw)
++            ranked = {index: row for index, row in ranked.items() if index < min(len(candidates), 80)}
+             if not ranked:
+-                raise ValueError("Model returned no valid candidate rankings")
++                raise ValueError("Model returned no valid in-range candidate rankings")
+ 
+             for i, candidate in enumerate(candidates[:80]):
+                 item = ranked.get(i)
+diff --git a/ai/tests/test_llm_scoring.py b/ai/tests/test_llm_scoring.py
+index a0ecfe3..42be3c0 100644
+--- a/ai/tests/test_llm_scoring.py
++++ b/ai/tests/test_llm_scoring.py
+@@ -30,6 +30,19 @@ def test_parse_rankings_accepts_fenced_json_and_ignores_bad_indexes():
+     }
+ 
+ 
++def test_parse_rankings_rejects_fractional_boolean_and_ambiguous_duplicate_indexes():
++    raw = json.dumps([
++        {"i": 0.9, "score": 99},
++        {"i": True, "score": 98},
++        {"i": "1.0", "score": 97},
++        {"i": 0, "score": 75, "rationale": "first valid row"},
++        {"i": 0, "score": 100, "rationale": "duplicate row"},
++    ])
++    assert llm._parse_rankings(raw) == {
++        0: {"score": 75.0, "rationale": "first valid row"}
++    }
++
++
+ def test_score_candidates_uses_raw_responses_payload(monkeypatch):
+     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+     monkeypatch.setattr(llm, "urlopen", lambda *args, **kwargs: _FakeResponse({
+@@ -170,6 +183,21 @@ def test_provider_failure_is_recorded_without_breaking_deterministic_scores(monk
+         "errorType": "TimeoutError",
+     }
+ 
++
++def test_provider_output_with_only_out_of_range_indexes_falls_back(monkeypatch):
++    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
++    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
++        "output_text": json.dumps([{"i": 12, "score": 100, "rationale": "invalid index"}])
++    }))
++    candidates = [{"start": 1, "end": 8, "score": 63, "text": "A moment", "features": {}}]
++
++    result = llm.score_candidates(candidates, "A moment")
++
++    assert result[0]["score"] == 63
++    assert result[0]["features"]["llmRanking"] == {
++        "provider": "openai", "status": "unavailable", "errorType": "ValueError",
++    }
++
+ def test_model_title_is_parsed_and_attached_to_candidate(monkeypatch):
+     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+     monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+diff --git a/ai/tests/test_transcribe.py b/ai/tests/test_transcribe.py
+index e865d29..06a9212 100644
+--- a/ai/tests/test_transcribe.py
++++ b/ai/tests/test_transcribe.py
+@@ -47,6 +47,39 @@ def test_transcribe_preserves_segment_and_word_timestamps(monkeypatch):
+     assert result["segments"][0]["words"][0]["confidence"] == 0.97
+ 
+ 
++def test_transcribe_discards_invalid_times_and_bounds_words_to_segments(monkeypatch):
++    valid = SimpleNamespace(
++        start=2.0,
++        end=5.0,
++        text=" valid segment ",
++        words=[
++            SimpleNamespace(start=1.9, end=2.2, word=" edge", probability=0.9),
++            SimpleNamespace(start=3.0, end=2.5, word=" reversed", probability=0.8),
++            SimpleNamespace(start=4.8, end=5.2, word=" clipped", probability=float("nan")),
++            SimpleNamespace(start=float("inf"), end=5.0, word=" invalid", probability=0.5),
++        ],
++    )
++    invalid = SimpleNamespace(start=float("nan"), end=6.0, text="not timed", words=[])
++    beyond_duration = SimpleNamespace(start=10.0, end=11.0, text="outside", words=[])
++    out_of_order = SimpleNamespace(start=0.5, end=1.5, text="first", words=[])
++    fake_model = SimpleNamespace(
++        transcribe=lambda *_args, **_kwargs: (
++            iter([valid, invalid, beyond_duration, out_of_order]),
++            SimpleNamespace(language="en", duration=8.0),
++        )
++    )
++    monkeypatch.setattr(transcription, "_model", fake_model)
++
++    result = transcription.transcribe("source.mp4")
++
++    assert [(row["start"], row["end"]) for row in result["segments"]] == [(0.5, 1.5), (2.0, 5.0)]
++    assert result["text"] == "first valid segment"
++    assert result["segments"][1]["words"] == [
++        {"start": 2.0, "end": 2.2, "word": " edge", "confidence": 0.9},
++        {"start": 4.8, "end": 5.0, "word": " clipped", "confidence": None},
++    ]
++
++
+ def test_transcription_range_validates_one_hour_limit():
+     from ai.services.transcription_range import validate_transcription_range
+ 
+diff --git a/ai/transcribe.py b/ai/transcribe.py
+index c281a82..d84a86a 100644
+--- a/ai/transcribe.py
++++ b/ai/transcribe.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+ 
+ import os
++import math
+ from threading import Lock
+ from typing import Any
+ 
+@@ -10,6 +11,14 @@ _model: Any = None
+ _model_lock = Lock()
+ 
+ 
++def _finite(value: Any) -> float | None:
++    try:
++        number = float(value)
++    except (TypeError, ValueError, OverflowError):
++        return None
++    return number if math.isfinite(number) else None
++
++
+ def model():
+     """Load the configured Whisper model once, even under concurrent requests."""
+     global _model
+@@ -34,30 +43,56 @@ def transcribe(path: str, language: str | None = None) -> dict:
+         vad_filter=True,
+     )
+     output = []
+-    text_parts = []
++    duration = _finite(getattr(info, "duration", None))
++    duration_limit = duration if duration is not None and duration > 0 else None
+     for segment in segments:
++        start = _finite(getattr(segment, "start", None))
++        end = _finite(getattr(segment, "end", None))
++        if start is None or end is None or start < 0 or end <= start:
++            continue
++        if duration_limit is not None:
++            if start >= duration_limit:
++                continue
++            end = min(end, duration_limit)
++        if end <= start:
++            continue
+         words = []
+-        for word in segment.words or []:
++        for word in getattr(segment, "words", None) or []:
++            word_start = _finite(getattr(word, "start", None))
++            word_end = _finite(getattr(word, "end", None))
++            if word_start is None or word_end is None or word_end <= word_start:
++                continue
++            # Whisper word alignment can cross a segment edge by a few
++            # milliseconds. Keep only the part supported by its parent segment.
++            word_start = max(start, word_start)
++            word_end = min(end, word_end)
++            if word_end <= word_start:
++                continue
++            probability = _finite(getattr(word, "probability", None))
++            if probability is not None and not 0.0 <= probability <= 1.0:
++                probability = None
++            word_text = getattr(word, "word", "")
+             words.append({
+-                "start": float(word.start),
+-                "end": float(word.end),
+-                "word": word.word,
+-                "confidence": float(word.probability) if word.probability is not None else None,
++                "start": word_start,
++                "end": word_end,
++                "word": word_text if isinstance(word_text, str) else str(word_text),
++                "confidence": probability,
+             })
+-        segment_text = segment.text.strip()
++        words.sort(key=lambda word: (word["start"], word["end"]))
++        raw_text = getattr(segment, "text", "")
++        segment_text = raw_text.strip() if isinstance(raw_text, str) else str(raw_text or "").strip()
+         output.append({
+-            "start": float(segment.start),
+-            "end": float(segment.end),
++            "start": start,
++            "end": end,
+             "text": segment_text,
+             "confidence": None,
+             "words": words,
+         })
+-        text_parts.append(segment_text)
+-
+-    duration = float(getattr(info, "duration", 0) or 0)
++    output.sort(key=lambda segment: (segment["start"], segment["end"]))
++    text_parts = [segment["text"] for segment in output]
+     return {
+         "language": info.language,
+         "text": " ".join(part for part in text_parts if part),
+         "segments": output,
+-        "duration": duration,
++        "duration": duration_limit if duration_limit is not None else (duration or 0.0),
+     }

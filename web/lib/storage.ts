@@ -52,9 +52,17 @@ export async function saveStream(key:string,stream:NodeJS.ReadableStream){
   return target;
 }
 export async function putFile(key:string,filePath:string,mimeType?:string){
-  if(!isObjectStorage())return;
+  const local=await stat(filePath);
+  if(local.size<=0)throw new Error("Refusing to store an empty media artifact: "+key);
+  if(!isObjectStorage()){
+    const persisted=await headStorage(key);
+    if(!Number.isFinite(persisted.size)||persisted.size<=0)throw new Error("Local storage did not persist media artifact: "+key);
+    return;
+  }
   const {bucket}=s3Config();
   await new Upload({client:s3(),params:{Bucket:bucket,Key:key,Body:createReadStream(filePath),ContentType:mimeType}}).done();
+  const persisted=await headStorage(key);
+  if(!Number.isFinite(persisted.size)||persisted.size<=0)throw new Error("Object storage did not persist media artifact: "+key);
 }
 export async function ensureLocalStorage(key:string){
   const file=storagePath(key);

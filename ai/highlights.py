@@ -64,8 +64,9 @@ def _window_text(segments, start, end):
         if seg_start >= 0 and seg_end > seg_start and seg_end > start and seg_start < end:
             text = str(segment.get("text", "")).strip()
             if text:
-                pieces.append(text)
-    return " ".join(pieces).strip()
+                pieces.append((seg_start, text))
+    pieces.sort(key=lambda item: item[0])
+    return " ".join(text for _, text in pieces).strip()
 
 def candidates(segments, instruction=None, categories=None, media=None):
     allowed = {ALIASES.get(str(c).lower(), str(c).lower()) for c in (categories or ["ai_detect"])}

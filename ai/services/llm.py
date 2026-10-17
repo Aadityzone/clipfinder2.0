@@ -1,6 +1,8 @@
 import base64
 import json
+import math
 import os
+import re
 from urllib.request import Request, urlopen
 
 
@@ -105,6 +107,8 @@ def _ollama_request_body(
 
 def _parse_rankings(raw: str) -> dict[int, dict]:
     """Parse model rankings defensively; ignore malformed and out-of-range indexes."""
+    if not isinstance(raw, str):
+        return {}
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1]
@@ -121,12 +125,25 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
         if not isinstance(item, dict):
             continue
         index = item.get("i")
+        if isinstance(index, bool):
+            continue
+        if isinstance(index, int):
+            parsed_index = index
+        elif isinstance(index, str) and re.fullmatch(r"\d+", index.strip()):
+            try:
+                parsed_index = int(index.strip())
+            except (ValueError, OverflowError):
+                continue
+        else:
+            continue
+        raw_score = item.get("score")
+        if isinstance(raw_score, bool):
+            continue
         try:
-            index = int(index)
-            score = float(item.get("score"))
+            score = float(raw_score)
         except (TypeError, ValueError, OverflowError):
             continue
-        if index < 0 or not 0 <= score <= 100:
+        if parsed_index < 0 or not math.isfinite(score) or not 0 <= score <= 100:
             continue
         ranking = {
             "score": score,
@@ -135,7 +152,9 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
         title = item.get("title")
         if isinstance(title, str) and title.strip():
             ranking["title"] = title.strip()[:120]
-        ranked[index] = ranking
+        # Duplicate indices are ambiguous model output. Keep the first valid
+        # ranking so later repeated rows cannot silently overwrite it.
+        ranked.setdefault(parsed_index, ranking)
     return ranked
 
 
@@ -329,8 +348,9 @@ def score_candidates(
 
             raw = _ollama_response_text(data) if provider == "ollama" else _response_text(data)
             ranked = _parse_rankings(raw)
+            ranked = {index: row for index, row in ranked.items() if index < min(len(candidates), 80)}
             if not ranked:
-                raise ValueError("Model returned no valid candidate rankings")
+                raise ValueError("Model returned no valid in-range candidate rankings")
 
             for i, candidate in enumerate(candidates[:80]):
                 item = ranked.get(i)

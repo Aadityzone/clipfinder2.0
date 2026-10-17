@@ -49,11 +49,25 @@ def face_features(path: str) -> dict:
         import cv2
     except ImportError:
         return {"available": False, "faces": []}
+    # Face detection is optional evidence. Some OpenCV builds omit the
+    # cascade API (including OpenCV 5 builds), so its absence must not fail
+    # the entire media analysis request.
+    cascade_type = getattr(cv2, "CascadeClassifier", None)
+    data = getattr(cv2, "data", None)
+    haarcascades = getattr(data, "haarcascades", None)
+    if not callable(cascade_type) or not isinstance(haarcascades, str):
+        return {"available": False, "faces": [], "reason": "cascade_classifier_unavailable"}
     cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        cap.release()
+        return {"available": False, "faces": [], "reason": "video_capture_unavailable"}
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     duration = frames / fps if fps else 0
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    cascade = cascade_type(haarcascades + "haarcascade_frontalface_default.xml")
+    if cascade.empty():
+        cap.release()
+        return {"available": False, "faces": [], "reason": "cascade_classifier_unavailable"}
     samples, t = [], 0.0
     step = max(1.0, min(3.0, duration / 60 if duration else 3.0))
     while t < duration and len(samples) < 180:
