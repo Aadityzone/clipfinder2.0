@@ -77,8 +77,11 @@ export async function completeJobAndEnqueue(
   next: { userId: string; projectId: string | null; type: string; payload: unknown },
 ) {
   return db.$transaction(async (tx) => {
+    // Only an actively processing job may complete. Restricting this transition
+    // prevents a late worker from resurrecting FAILED/READY jobs after a timeout
+    // or competing worker has already recorded a terminal state.
     const completed = await tx.job.updateMany({
-      where: { id, status: { not: "CANCELLED" } },
+      where: { id, status: { in: ACTIVE_JOB_STATUSES } },
       data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
     });
     if (!completed.count) return null;
@@ -105,8 +108,10 @@ export async function assertJobNotCancelled(id: string) {
 }
 
 export async function finishJob(id: string) {
+  // Use the same state-transition guard as stage completion: a late worker must
+  // not overwrite a FAILED or already READY job with a successful result.
   await db.job.updateMany({
-    where: { id, status: { not: "CANCELLED" } },
+    where: { id, status: { in: ACTIVE_JOB_STATUSES } },
     data: { status: "READY", progress: 1, finishedAt: new Date(), error: null },
   });
   return db.job.findUnique({ where: { id } });
