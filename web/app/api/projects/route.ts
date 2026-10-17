@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     const outcome = await db.$transaction(async (tx) => {
       if (parsedSource && sourceRange) {
         const key = `${parsedSource.url}|${sourceRange.startSeconds}|${sourceRange.endSeconds}`;
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.id}), hashtext(${key}))`;
+        await tx.$queryRaw`SELECT 1 WHERE pg_advisory_xact_lock(hashtext(${user.id}), hashtext(${key})) IS NULL`;
         const activeProjects = await tx.project.findMany({
           where: {
             userId: user.id,
