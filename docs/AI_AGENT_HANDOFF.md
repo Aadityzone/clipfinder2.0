@@ -1,9 +1,9 @@
 # AI Engineering Handoff — Clip Finder 2.0
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17
 Repository: https://github.com/Aadityzone/clipfinder2.0
-Working branch: `build/universal-genre-foundation`
-Branch HEAD when this handoff was written: `bb9bc7578f072ff1babdcb809b302cd26539f76d`
+Working branch: `fix/real-video-acceptance`
+Branch HEAD when this handoff was written: `4f310f2917878d55abce0de616e5ca398e8f1d6c`
 Related PR: https://github.com/Aadityzone/clipfinder2.0/pull/19
 
 This is the working handoff for another coding agent. Read this file and the linked project docs before changing the AI pipeline. Update this handoff when meaningful code or validation status changes.
@@ -127,3 +127,13 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 - Regression coverage in `ai/tests/test_story_intelligence.py` checks anchor inclusion on a long continuous transcript and verifies punctuation snapping respects the 75-second cap.
 - Verification on the complete shared worktree, including the visible RAG and time-range changes: `python -m pytest -q -p no:cacheprovider ai/tests` — **181 passed**, one `StarletteDeprecationWarning`, 1.33 seconds. Pytest was run outside the sandbox because its temporary-directory fixture is blocked inside it.
 - No real media was processed. The boundary change is verified against deterministic transcript fixtures; real-video candidate quality remains unmeasured.
+
+## Real AI API acceptance and optional face-signal fallback (2026-10-17)
+
+- Source: official Blender Foundation upload, [Sintel - Open Movie](https://www.youtube.com/watch?v=eRsGyueVLvQ). The AI API returned metadata for the 888-second video. The test downloaded only the selected 90-second interval `[90, 180]` through `/v1/ingest`; FFprobe reported H.264, 2048×872, audio present, and the response retained `sourceDuration=888`, `sourceStartS=90`, `sourceEndS=180`.
+- Started the FastAPI service with `WHISPER_MODEL=tiny`, `WHISPER_DEVICE=cpu`, and `WHISPER_COMPUTE_TYPE=int8`, then called `/v1/transcribe`. Faster Whisper returned six real English segments with word timestamps. The first, music-heavy `[0, 90]` sample returned no segments and was not treated as a successful end-to-end run. The configured `small` model was not cached; its initial weight download stalled. Automatic GPU transcription of the later interval exceeded a 60-second client timeout, while CPU/int8 with cached `tiny` completed in 3.7 seconds.
+- `/v1/analyze` initially returned HTTP 500 because the installed OpenCV 5.0 module has `VideoCapture` but no `CascadeClassifier`. Face detection is optional; `face_features` now reports `available=false` with a reason when the cascade API or cascade data is unavailable. Repeating the same real request returned seven ranked candidates. All seven had finite, ordered intervals within the 90-second downloaded file, scores in `[0, 100]`, and descending rank order. RAG reported unavailable because `sentence-transformers` is not installed.
+- The web worker's existing `toSourceTimestamps`/`toMediaLocalSegments` mapping and `mediaOffsetSeconds` contract adds the 90-second source offset to media-local timestamps; `web/lib/analysis-range.test.ts` passed all eight tests. The selected local candidate `[43.5, 73.5]` therefore maps to original source interval `[133.5, 163.5]`.
+- `/v1/render` returned a 30-second MP4, 8,180,871 bytes, 1080×1920. FFprobe confirmed its video stream and duration; `ffmpeg -v error -i <clip> -f null -` decoded it successfully.
+- Regression and full-suite verification after the OpenCV fallback: `python -m pytest -q -p no:cacheprovider ai/tests/test_media_intelligence.py` — **3 passed**; `python -m pytest -q -p no:cacheprovider ai/tests` — **188 passed**, one Starlette/httpx deprecation warning. Web offset tests: `npm --workspace web exec -- tsx --test lib/analysis-range.test.ts` — **8 passed**. These commands required execution outside the sandbox because its process/temp-directory restrictions blocked pytest and Node's test runner.
+- This verifies URL metadata, bounded AI-service ingestion, real transcription, candidate generation/ranking, range-offset mapping logic, and playable rendering through the AI HTTP API. It does **not** verify web authentication, job enqueue/recovery, PostgreSQL persistence, project refresh, editor saves, or the full web worker: this environment had no `DATABASE_URL`, `AI_SERVICE_URL`, or `AI_SERVICE_SECRET` configured. Candidate quality was not evaluated against human labels. GitHub Actions were not run for this local change.
