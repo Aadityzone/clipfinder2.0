@@ -197,23 +197,38 @@ export async function finishJob(id: string, client: DbClient = db, expectedAttem
 export async function failJob(
   id: string,
   error: string,
-  options: { retryable?: boolean; expectedAttempts?: number; client?: DbClient } = {},
+  optionsOrClient: { retryable?: boolean; expectedAttempts?: number; client?: DbClient } | DbClient = {},
+  expectedAttemptsLegacy?: number,
 ) {
-  const client = options.client ?? db;
+  let client: DbClient = db;
+  let retryable = true;
+  let expectedAttempts: number | undefined;
+
+  if (optionsOrClient && ("job" in optionsOrClient || "$transaction" in optionsOrClient)) {
+    client = optionsOrClient as DbClient;
+    expectedAttempts = expectedAttemptsLegacy;
+  } else if (typeof optionsOrClient === "object") {
+    const opts = optionsOrClient as { retryable?: boolean; expectedAttempts?: number; client?: DbClient };
+    client = opts.client ?? db;
+    retryable = opts.retryable !== false;
+    expectedAttempts = opts.expectedAttempts;
+  }
+
   const current = await client.job.findUnique({ where: { id } });
   if (!current || (TERMINAL_JOB_STATUSES as readonly string[]).includes(current.status)) return current;
   if (!(ACTIVE_JOB_STATUSES as readonly string[]).includes(current.status)) return current;
-  if (options.expectedAttempts !== undefined && current.attempts !== options.expectedAttempts) return current;
+  if (expectedAttempts !== undefined && current.attempts !== expectedAttempts) return current;
 
   // A late or gigantic error string must not be stored wholesale in the job row.
   const boundedError = String(error).slice(0, MAX_ERROR_LENGTH);
-  const shouldRetry = options.retryable !== false && current.attempts < MAX_ATTEMPTS;
+  const shouldRetry = retryable && current.attempts < MAX_ATTEMPTS;
   const retryDelayMs = 15_000 * 2 ** Math.max(0, current.attempts - 1);
-  await client.job.updateMany({
-    where: { id, status: current.status, attempts: current.attempts },
+  const changed = await client.job.updateMany({
+    where: { id, status: current.status, attempts: expectedAttempts ?? current.attempts },
     data: shouldRetry
       ? { status: "QUEUED", error: boundedError, finishedAt: null, runAfter: new Date(Date.now() + retryDelayMs) }
       : { status: "FAILED", error: boundedError, finishedAt: new Date(), runAfter: null },
   });
+  if (!changed.count) return client.job.findUnique({ where: { id } });
   return client.job.findUnique({ where: { id } });
 }

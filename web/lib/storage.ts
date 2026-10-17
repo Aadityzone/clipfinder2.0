@@ -52,8 +52,8 @@ export async function saveStream(key:string,stream:NodeJS.ReadableStream){
   return target;
 }
 export async function putFile(key:string,filePath:string,mimeType?:string){
-  const size=(await stat(filePath)).size;
-  if(size<=0)throw new Error("Refusing to store an empty media artifact: "+key);
+  const local=await stat(filePath);
+  if(local.size<=0)throw new Error("Refusing to store an empty media artifact: "+key);
   if(!isObjectStorage()){
     const persisted=await headStorage(key);
     if(!Number.isFinite(persisted.size)||persisted.size<=0)throw new Error("Local storage did not persist media artifact: "+key);
