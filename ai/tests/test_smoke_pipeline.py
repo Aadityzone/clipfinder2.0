@@ -132,3 +132,21 @@ def test_smoke_rejects_render_that_is_not_probeable_video(monkeypatch, tmp_path)
         smoke_pipeline.run_pipeline(source, tmp_path / "out")
 
     assert failure.value.stage == "render"
+
+
+
+def test_smoke_invalid_source_metadata_is_reported_as_media_probe_failure(monkeypatch, tmp_path):
+    import pytest
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: {
+        "duration": 0, "width": None, "height": None, "hasAudio": False,
+    })
+
+    with pytest.raises(smoke_pipeline.SmokeStageError, match="no valid duration") as failure:
+        smoke_pipeline.run_pipeline(source, tmp_path / "out")
+
+    assert failure.value.stage == "media_probe"
+    assert failure.value.error_type == "RuntimeError"

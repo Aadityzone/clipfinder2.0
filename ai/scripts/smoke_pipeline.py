@@ -87,9 +87,9 @@ def run_pipeline(
         raise SmokeStageError("media_probe", exc) from exc
     duration = _number(metadata.get("duration"))
     if duration <= 0:
-        raise RuntimeError("Source video has no valid duration.")
+        raise SmokeStageError("media_probe", RuntimeError("Source video has no valid duration."))
     if not metadata.get("width") or not metadata.get("height"):
-        raise RuntimeError("Source does not contain a valid video stream.")
+        raise SmokeStageError("media_probe", RuntimeError("Source does not contain a valid video stream."))
 
     try:
         transcript_result = transcribe(str(source), language)
