@@ -1,7 +1,0 @@
-{
-  "status": "failed",
-  "stage": "download",
-  "source": "https://example.com/video",
-  "errorType": "RuntimeError",
-  "error": "source provider rejected request"
-}
