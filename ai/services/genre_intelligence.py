@@ -173,4 +173,4 @@ def apply_genre_profile(
                 str(candidate.get("rationale") or "").rstrip(".")
                 + f"; genre fit: {active.replace('_', ' ')} ({matches} cue matches)."
             )
-    return candidates
+    return safe_candidates
