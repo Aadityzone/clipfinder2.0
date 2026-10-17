@@ -23,7 +23,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install --include=optional
-      - run: npm ls lightningcss lightningcss-linux-x64-gnu
+      - run: npm ls lightningcss lightningcss-linux-x64-gnu @tailwindcss/oxide @tailwindcss/oxide-linux-x64-gnu
       - run: npm run prisma:generate
       - run: npx prisma validate --schema prisma/schema.prisma
       - run: npm run typecheck
