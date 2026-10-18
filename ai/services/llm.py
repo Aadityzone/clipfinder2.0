@@ -229,6 +229,31 @@ def _request_body(model: str, prompt: dict, frame_urls: dict[int, str] | None = 
     }).encode()
 
 
+def _candidate_features(candidate: dict) -> dict:
+    """Return candidate feature metadata only when it has the expected shape."""
+    features = candidate.get("features")
+    return features if isinstance(features, dict) else {}
+
+
+def _retrieved_context_rows(context: object, index: int) -> list[dict]:
+    """Keep malformed retrieval metadata from crashing model prompt construction."""
+    if not isinstance(context, dict):
+        return []
+    rows = context.get(index, [])
+    if not isinstance(rows, (list, tuple)):
+        return []
+    safe_rows = []
+    for row in rows[:3]:
+        if not isinstance(row, dict):
+            continue
+        safe_rows.append({
+            "start": row.get("start"),
+            "end": row.get("end"),
+            "text": str(row.get("text", ""))[:800],
+        })
+    return safe_rows
+
+
 def score_candidates(
     candidates: list[dict],
     transcript: str,
@@ -261,6 +286,7 @@ def score_candidates(
     if not providers:
         return candidates
 
+    transcript_text = transcript if isinstance(transcript, str) else ""
     compact = [{
         "i": i,
         "start": c["start"],
@@ -268,26 +294,25 @@ def score_candidates(
         "text": c.get("text", ""),
         "category": c.get("category"),
         "features": {
-            "hookSignals": c.get("features", {}).get("hookSignals", {}),
-            "audioEnergy": c.get("features", {}).get("audioEnergy", 0),
-            "sceneHits": c.get("features", {}).get("sceneHits", 0),
-            "faceHits": c.get("features", {}).get("faceHits", 0),
-            "visualChange": c.get("features", {}).get("visualChange", 0),
-            "motion": c.get("features", {}).get("motion", 0),
-            "gameplayLikeRatio": c.get("features", {}).get("gameplayLikeRatio", 0),
-            "onScreenActionLabels": c.get("features", {}).get("onScreenActionLabels", []),
-            "eventKind": c.get("features", {}).get("eventKind"),
-            "eventStrength": c.get("features", {}).get("eventStrength", 0),
+            "hookSignals": _candidate_features(c).get("hookSignals", {}),
+            "audioEnergy": _candidate_features(c).get("audioEnergy", 0),
+            "sceneHits": _candidate_features(c).get("sceneHits", 0),
+            "faceHits": _candidate_features(c).get("faceHits", 0),
+            "visualChange": _candidate_features(c).get("visualChange", 0),
+            "motion": _candidate_features(c).get("motion", 0),
+            "gameplayLikeRatio": _candidate_features(c).get("gameplayLikeRatio", 0),
+            "onScreenActionLabels": _candidate_features(c).get("onScreenActionLabels", []),
+            "eventKind": _candidate_features(c).get("eventKind"),
+            "eventStrength": _candidate_features(c).get("eventStrength", 0),
         },
         "retrieved_transcript_context": [
-            {"start": row.get("start"), "end": row.get("end"), "text": str(row.get("text", ""))[:800]}
-            for row in (retrieved_context or {}).get(i, [])[:3]
+            row for row in _retrieved_context_rows(retrieved_context, i)
         ],
     } for i, c in enumerate(candidates[:80])]
     prompt = {
         "instruction": instruction or "Rank moments by genuine clip-worthiness.",
         "genre": genre or "auto",
-        "transcript_context": transcript[:30000],
+        "transcript_context": transcript_text[:30000],
         "candidates": compact,
         "visual_evidence_note": (
             "Some candidates may have a single sampled frame attached. "
@@ -345,18 +370,39 @@ def score_candidates(
             if not ranked:
                 raise ValueError("Model returned no valid candidate rankings")
 
+            # Stage all score updates before mutating candidates. If one candidate
+            # has malformed data, do not partially apply this provider's response
+            # and then accidentally score already-mutated candidates a second time
+            # when falling back to another provider.
+            staged: list[tuple[int, dict, float, dict]] = []
             for i, candidate in enumerate(candidates[:80]):
                 item = ranked.get(i)
                 if not item:
                     continue
+                try:
+                    base_score = float(candidate.get("score", 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(base_score):
+                    continue
                 llm_score = item["score"]
-                candidate["score"] = round(float(candidate.get("score", 0)) * .55 + llm_score * .45, 2)
+                blended_score = round(base_score * .55 + llm_score * .45, 2)
+                staged.append((i, candidate, blended_score, item))
+
+            if not staged:
+                raise ValueError("Model rankings did not match any scoreable candidates")
+
+            for i, candidate, blended_score, item in staged:
+                candidate["score"] = blended_score
                 if item["rationale"]:
                     candidate["rationale"] = item["rationale"]
                 if item.get("title"):
                     candidate["title"] = item["title"]
-                features = candidate.setdefault("features", {})
-                features["llmScore"] = llm_score
+                features = candidate.get("features")
+                if not isinstance(features, dict):
+                    features = {}
+                    candidate["features"] = features
+                features["llmScore"] = item["score"]
                 features["llmProvider"] = provider
                 if i in frame_urls:
                     features["llmVisualEvidence"] = True
