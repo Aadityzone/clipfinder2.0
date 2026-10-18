@@ -256,3 +256,40 @@ def test_openai_failure_falls_back_to_configured_ollama(monkeypatch):
     assert result[0]["features"]["llmRanking"]["status"] == "completed"
     assert result[0]["title"] == "The Final Payoff"
 
+
+
+
+def test_malformed_candidate_score_is_skipped_without_blocking_other_rankings(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([
+            {"i": 0, "score": 100, "rationale": "Model response for malformed candidate"},
+            {"i": 1, "score": 100, "rationale": "Strong payoff"},
+        ])
+    }))
+    candidates = [
+        {"start": 1, "end": 4, "score": "not-a-number", "text": "Malformed score", "features": {}},
+        {"start": 5, "end": 12, "score": 60, "text": "Valid score", "features": []},
+    ]
+
+    result = llm.score_candidates(candidates, "A strong payoff")
+
+    assert result[0]["score"] == "not-a-number"
+    assert "llmScore" not in result[0]["features"]
+    assert result[1]["score"] == 78.0
+    assert result[1]["features"]["llmScore"] == 100.0
+    assert result[1]["features"]["llmRanking"]["status"] == "completed"
+
+
+def test_non_finite_candidate_score_is_not_blended_with_model_score(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([{"i": 0, "score": 95, "rationale": "Strong moment"}])
+    }))
+    candidates = [{"start": 1, "end": 8, "score": float("nan"), "text": "Moment", "features": {}}]
+
+    result = llm.score_candidates(candidates, "Moment")
+
+    assert result[0]["score"] != result[0]["score"]  # remains NaN; never treated as a valid score
+    assert "llmScore" not in result[0]["features"]
+    assert result[0]["features"]["llmRanking"]["status"] == "unavailable"
