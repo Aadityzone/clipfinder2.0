@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "worker": "tsx worker.ts",
+    "test": "tsx --test \"lib/**/*.test.ts\"",
     "test:storage": "tsx --test lib/storage.test.ts"
   },
   "dependencies": {

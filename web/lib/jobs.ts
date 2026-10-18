@@ -118,14 +118,22 @@ export async function finishJob(id: string) {
 }
 
 /**
- * Retry transient failures automatically with bounded exponential backoff.
- * The third failed attempt becomes terminal; the user can explicitly retry it.
+ * Record a job failure. Transient failures are retried automatically with
+ * bounded exponential backoff and the third failed attempt becomes terminal.
+ *
+ * A permanent failure (invalid or unsupported source, missing media, malformed
+ * request) is recorded as terminal immediately. Retrying it would only spend
+ * another full stage timeout, up to several hours, reproducing the same error.
  */
-export async function failJob(id: string, error: string) {
+export async function failJob(
+  id: string,
+  error: string,
+  options: { retryable?: boolean } = {},
+) {
   const current = await db.job.findUnique({ where: { id } });
   if (!current || current.status === "CANCELLED" || current.status === "READY") return current;
 
-  const shouldRetry = current.attempts < MAX_ATTEMPTS;
+  const shouldRetry = options.retryable !== false && current.attempts < MAX_ATTEMPTS;
   const retryDelayMs = 15_000 * 2 ** Math.max(0, current.attempts - 1);
   await db.job.updateMany({
     where: { id, status: { notIn: ["CANCELLED", "READY"] } },
