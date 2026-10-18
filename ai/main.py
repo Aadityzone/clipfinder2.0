@@ -9,7 +9,7 @@ from .services.render import render
 from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
-from .services.dedup import deduplicate, enforce_temporal_diversity
+from .services.dedup import deduplicate, enforce_temporal_diversity, select_candidates
 from .services.llm import score_candidates, ranking_capabilities
 from .services.semantic import enrich_semantics
 from .services.transcript_rag import enrich_candidates_with_context
@@ -65,12 +65,14 @@ class AnalyzeRequest(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     candidates: list[dict]
+    selection: dict | None = None
 
 class LongFormResponse(BaseModel):
     stories: list[dict]
     title: str
     description: str
     chapters: list[dict]
+    selection: dict | None = None
 
 class RenderRequest(BaseModel):
     input_path: str
@@ -264,7 +266,15 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
                     context["end"] = round(float(context["end"]) + range_start, 3)
             absolute_candidates = validate_candidates(local_result.get("candidates", []), source_duration)
             absolute_candidates = sorted(absolute_candidates, key=lambda item: float(item.get("score", 0)), reverse=True)
-            return {"candidates": absolute_candidates[:50]}
+            # The recursive call already diversified its local window, but re-sorting by
+            # score above undoes that ordering. Restore it so the 50-candidate cap cannot
+            # fill up with several windows from one short section of the bounded range.
+            absolute_candidates = enforce_temporal_diversity(absolute_candidates)
+            delivered = absolute_candidates[:50]
+            report = dict(local_result.get("selection") or {})
+            report["deliveredCount"] = len(delivered)
+            report["boundedRangeSeconds"] = [range_start, range_end]
+            return {"candidates": delivered, "selection": report}
     media_duration = None
     if b.media_path:
         if not os.path.isfile(b.media_path):
@@ -332,11 +342,21 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     # Revalidate after model/profile adjustments so the API never emits invalid scores.
     result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
+    # Final selection pass on the scores the caller actually sees. The earlier
+    # deduplicate() ran before the speaker, genre and creator adjustments above, so
+    # a candidate boosted afterwards could still duplicate an already-kept moment.
+    # This pass also enforces clip duration bounds and reports why rows were dropped
+    # instead of letting them disappear silently.
+    selection = select_candidates(result)
+    result = selection["selected"]
     # Promote temporal spread so the strongest moments are not all concentrated in
     # one portion of a long source. Every candidate is preserved: rows that violate
     # spacing or window density are deferred behind the diverse tier in score order.
     result = enforce_temporal_diversity(result)
-    return {"candidates": result[:50]}
+    delivered = result[:50]
+    report = dict(selection["report"])
+    report["deliveredCount"] = len(delivered)
+    return {"candidates": delivered, "selection": report}
 
 @app.post("/v1/longform", response_model=LongFormResponse)
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
@@ -358,7 +378,13 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     items = apply_genre_profile(items, transcript, b.genre)
     items = apply_creator_preferences(items, b.creator_preferences)
     items = validate_candidates(items, media_duration)
-    items = deduplicate(items, threshold=0.55)
+    # Long-form chapters are long by design (stories() caps a window at 300s), so the
+    # short-form clip floor would be wrong here and only a wide ceiling is enforced.
+    # The value of this pass is containment dedup (a short beat that sits fully inside
+    # a longer chapter is the same moment) plus a report that keeps the rejection
+    # reasons available for debugging.
+    longform_selection = select_candidates(items, min_duration=None, max_duration=600.0)
+    items = longform_selection["selected"]
     items = validate_candidates(items, media_duration)
     items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)
     # Long-form story beats are longer, so use a wider spacing/window than short
@@ -370,7 +396,9 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     items = items[:6]
     items = _ensure_candidate_titles(items)
     meta = package(b.segments, items)
-    return {"stories": items, **meta}
+    longform_report = dict(longform_selection["report"])
+    longform_report["deliveredCount"] = len(items)
+    return {"stories": items, **meta, "selection": longform_report}
 
 @app.post("/v1/render")
 def render_route(b: RenderRequest, x_ai_secret: str | None = Header(default=None)):

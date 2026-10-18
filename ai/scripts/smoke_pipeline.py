@@ -173,6 +173,8 @@ def run_pipeline(
             "candidateCount": len(candidates),
             "renderedCount": len(rendered),
             "selection": selection_diagnostics(candidates, media_duration=duration),
+            # Why the selector kept or dropped each row, straight from the pipeline.
+            "pipelineSelection": analysis_result.get("selection"),
         },
         "clips": rendered,
         "limitations": [
