@@ -235,6 +235,25 @@ def _candidate_features(candidate: dict) -> dict:
     return features if isinstance(features, dict) else {}
 
 
+def _retrieved_context_rows(context: object, index: int) -> list[dict]:
+    """Keep malformed retrieval metadata from crashing model prompt construction."""
+    if not isinstance(context, dict):
+        return []
+    rows = context.get(index, [])
+    if not isinstance(rows, (list, tuple)):
+        return []
+    safe_rows = []
+    for row in rows[:3]:
+        if not isinstance(row, dict):
+            continue
+        safe_rows.append({
+            "start": row.get("start"),
+            "end": row.get("end"),
+            "text": str(row.get("text", ""))[:800],
+        })
+    return safe_rows
+
+
 def score_candidates(
     candidates: list[dict],
     transcript: str,
@@ -267,6 +286,7 @@ def score_candidates(
     if not providers:
         return candidates
 
+    transcript_text = transcript if isinstance(transcript, str) else ""
     compact = [{
         "i": i,
         "start": c["start"],
@@ -286,14 +306,13 @@ def score_candidates(
             "eventStrength": _candidate_features(c).get("eventStrength", 0),
         },
         "retrieved_transcript_context": [
-            {"start": row.get("start"), "end": row.get("end"), "text": str(row.get("text", ""))[:800]}
-            for row in (retrieved_context or {}).get(i, [])[:3]
+            row for row in _retrieved_context_rows(retrieved_context, i)
         ],
     } for i, c in enumerate(candidates[:80])]
     prompt = {
         "instruction": instruction or "Rank moments by genuine clip-worthiness.",
         "genre": genre or "auto",
-        "transcript_context": transcript[:30000],
+        "transcript_context": transcript_text[:30000],
         "candidates": compact,
         "visual_evidence_note": (
             "Some candidates may have a single sampled frame attached. "
