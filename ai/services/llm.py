@@ -345,18 +345,39 @@ def score_candidates(
             if not ranked:
                 raise ValueError("Model returned no valid candidate rankings")
 
+            # Stage all score updates before mutating candidates. If one candidate
+            # has malformed data, do not partially apply this provider's response
+            # and then accidentally score already-mutated candidates a second time
+            # when falling back to another provider.
+            staged: list[tuple[int, dict, float, dict]] = []
             for i, candidate in enumerate(candidates[:80]):
                 item = ranked.get(i)
                 if not item:
                     continue
+                try:
+                    base_score = float(candidate.get("score", 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(base_score):
+                    continue
                 llm_score = item["score"]
-                candidate["score"] = round(float(candidate.get("score", 0)) * .55 + llm_score * .45, 2)
+                blended_score = round(base_score * .55 + llm_score * .45, 2)
+                staged.append((i, candidate, blended_score, item))
+
+            if not staged:
+                raise ValueError("Model rankings did not match any scoreable candidates")
+
+            for i, candidate, blended_score, item in staged:
+                candidate["score"] = blended_score
                 if item["rationale"]:
                     candidate["rationale"] = item["rationale"]
                 if item.get("title"):
                     candidate["title"] = item["title"]
-                features = candidate.setdefault("features", {})
-                features["llmScore"] = llm_score
+                features = candidate.get("features")
+                if not isinstance(features, dict):
+                    features = {}
+                    candidate["features"] = features
+                features["llmScore"] = item["score"]
                 features["llmProvider"] = provider
                 if i in frame_urls:
                     features["llmVisualEvidence"] = True
