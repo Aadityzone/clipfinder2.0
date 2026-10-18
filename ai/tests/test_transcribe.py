@@ -92,3 +92,43 @@ def test_transcribe_timeout_raises_runtime_error(monkeypatch):
     else:
         raise AssertionError("Expected transcribe to time out")
 
+
+def test_silent_video_returns_empty_transcript_without_loading_whisper(monkeypatch):
+    monkeypatch.setattr(transcription, "ffprobe", lambda _path: {
+        "duration": 42.5, "hasAudio": False,
+    })
+    monkeypatch.setattr(
+        transcription,
+        "transcribe",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Whisper must be skipped")),
+    )
+
+    result = transcription.transcribe_media("silent.mp4")
+
+    assert result == {
+        "language": "unknown", "text": "", "segments": [], "duration": 42.5,
+    }
+
+
+def test_silent_video_range_is_validated_and_reports_range_duration(monkeypatch):
+    monkeypatch.setattr(transcription, "ffprobe", lambda _path: {
+        "duration": 42.5, "hasAudio": False,
+    })
+
+    result = transcription.transcribe_media("silent.mp4", "en", 10, 20)
+
+    assert result["language"] == "en"
+    assert result["text"] == ""
+    assert result["segments"] == []
+    assert result["duration"] == 10
+
+
+def test_silent_video_rejects_one_sided_range(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(transcription, "ffprobe", lambda _path: {
+        "duration": 42.5, "hasAudio": False,
+    })
+    with pytest.raises(ValueError, match="Both start_seconds and end_seconds"):
+        transcription.transcribe_media("silent.mp4", start_seconds=10)
+

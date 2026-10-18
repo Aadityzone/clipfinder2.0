@@ -9,8 +9,14 @@ from __future__ import annotations
 import os
 import re
 
-import cv2
 import numpy as np
+
+try:
+    import cv2
+    _CV2_IMPORT_ERROR = None
+except Exception as exc:  # OCR/action sampling is optional and native-wheel failures are common.
+    cv2 = None
+    _CV2_IMPORT_ERROR = exc
 
 ACTION_TERMS = {
     "combat": ("kill", "eliminated", "headshot", "attack", "damage", "enemy", "defeat"),
@@ -49,6 +55,13 @@ def _classify_ocr(text: str) -> list[str]:
 def analyze_on_screen(path: str, max_samples: int = 90, ocr_enabled: bool = True) -> dict:
     if not os.path.isfile(path):
         return {"available": False, "samples": [], "reason": "media not found"}
+    if cv2 is None:
+        return {
+            "available": False,
+            "ocrAvailable": False,
+            "samples": [],
+            "reason": f"OpenCV is unavailable ({type(_CV2_IMPORT_ERROR).__name__})",
+        }
 
     try:
         import pytesseract

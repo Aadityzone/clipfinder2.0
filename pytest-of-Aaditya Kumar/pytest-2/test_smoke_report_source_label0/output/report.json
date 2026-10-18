@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "source": "https://example.com/public-video",
+  "media": {
+    "duration": 10.0,
+    "width": 640,
+    "height": 360,
+    "hasAudio": true
+  },
+  "transcription": {
+    "language": "en",
+    "segmentCount": 1,
+    "characterCount": 11
+  },
+  "analysis": {
+    "genre": "auto",
+    "candidateCount": 1,
+    "renderedCount": 1
+  },
+  "clips": [
+    {
+      "file": "clip-01.mp4",
+      "start": 1.0,
+      "end": 3.0,
+      "duration": 2.0,
+      "score": 80.0,
+      "title": "Hello",
+      "category": "AI Detect",
+      "rationale": "",
+      "features": {},
+      "bytes": 2048
+    }
+  ],
+  "limitations": [
+    "A successful smoke test proves the tested source completed the local pipeline; it does not prove highlight quality across all genres.",
+    "Use human-labelled benchmarks to measure precision and recall."
+  ]
+}

@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 
 from .captions import write_ass
+from .media import ffprobe
 
 
 def _escape_filter_path(path: str) -> str:
@@ -40,6 +41,32 @@ def _normalize_segments(
     return normalized
 
 
+def validate_render_output(output_path: str, expected_duration: float) -> dict:
+    """Reject partial, corrupt, or truncated outputs before callers persist them."""
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) < 1024:
+        raise RuntimeError("Render output was not created or is too small to be a valid MP4.")
+
+    metadata = ffprobe(output_path)
+    try:
+        duration = float(metadata.get("duration") or 0)
+        width = int(metadata.get("width") or 0)
+        height = int(metadata.get("height") or 0)
+        expected = float(expected_duration)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("Render output has invalid media metadata.") from exc
+    if not all(map(math.isfinite, (duration, expected))) or duration <= 0:
+        raise RuntimeError("Render output has no valid video duration.")
+    if width <= 0 or height <= 0:
+        raise RuntimeError("Render output has no valid video stream or dimensions.")
+    tolerance = max(1.0, expected * 0.05)
+    if expected <= 0 or abs(duration - expected) > tolerance:
+        raise RuntimeError(
+            f"Render output duration {duration:.3f}s does not match the expected "
+            f"{expected:.3f}s (tolerance {tolerance:.3f}s)."
+        )
+    return metadata
+
+
 def render(
     input_path: str,
     output_path: str,
@@ -53,6 +80,7 @@ def render(
 ):
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     segs = _normalize_segments(start, end, segments)
+    expected_duration = sum(segment["end"] - segment["start"] for segment in segs)
     try:
         focus_x = float(focus_x)
     except (TypeError, ValueError, OverflowError):
@@ -123,6 +151,7 @@ def render(
 
     if not captions:
         render_base(output_path)
+        validate_render_output(output_path, expected_duration)
         return
 
     # Burn captions after assembling the complete edit so cue timestamps remain
@@ -142,3 +171,4 @@ def render(
             check=True,
             timeout=1800,
         )
+    validate_render_output(output_path, expected_duration)

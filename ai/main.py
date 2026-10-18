@@ -1,8 +1,7 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from .schemas import TranscribeRequest, TranscribeResponse
-from .transcribe import transcribe
-from .services.transcription_range import transcribe_range
+from .transcribe import transcribe_media, transcription_capabilities
 from .services.analysis_range import extract_analysis_range, shift_segments_to_range, validate_analysis_range
 from .services.download import download, download_range, get_video_metadata
 from .services.media import ffprobe
@@ -182,13 +181,11 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
     if not os.path.isfile(b.media_path):
         raise HTTPException(status_code=404, detail="Media file not found")
     try:
-        if b.start_seconds is None and b.end_seconds is None:
-            return transcribe(b.media_path, b.language)
-        if b.start_seconds is None or b.end_seconds is None:
-            raise HTTPException(status_code=400, detail="Both start_seconds and end_seconds are required for a source range.")
-        source_duration = float(ffprobe(b.media_path).get("duration") or 0)
-        return transcribe_range(
-            b.media_path, b.start_seconds, b.end_seconds, source_duration, b.language
+        return transcribe_media(
+            b.media_path,
+            b.language,
+            b.start_seconds,
+            b.end_seconds,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -200,7 +197,7 @@ def transcribe_route(b: TranscribeRequest, x_ai_secret: str | None = Header(defa
 @app.get("/v1/ai-capabilities")
 def ai_capabilities(x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
-    return {"diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES), "ranking": ranking_capabilities()}
+    return {"transcription": transcription_capabilities(), "diarization": diarization_status(), "semantic_embeddings": importlib.util.find_spec("sentence_transformers") is not None, "visual": visual_capabilities(), "ocr": {"installed": importlib.util.find_spec("pytesseract") is not None, "system_binary_available": shutil.which("tesseract") is not None, "requires_system_tesseract": True}, "genre_profiles": list(VALID_GENRES), "ranking": ranking_capabilities()}
 
 def _ensure_candidate_titles(candidates: list[dict]) -> list[dict]:
     """Give every candidate a transparent title fallback when no LLM title exists."""
