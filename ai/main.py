@@ -22,6 +22,7 @@ from .services.action_intelligence import _classify_ocr
 from .services.creator_feedback import apply_creator_preferences
 from .services.genre_intelligence import apply_genre_profile, VALID_GENRES
 from .services.candidate_contract import validate_candidates
+from .services.candidate_selection import select_temporally_diverse
 from .services.visual_candidates import multimodal_event_candidates
 import hmac
 import os
@@ -335,7 +336,8 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     # Revalidate after model/profile adjustments so the API never emits invalid scores.
     result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
-    return {"candidates": result[:50]}
+    result = select_temporally_diverse(result, limit=50, min_center_distance=20.0)
+    return {"candidates": result}
 
 @app.post("/v1/longform", response_model=LongFormResponse)
 def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
