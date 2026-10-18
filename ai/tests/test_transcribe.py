@@ -4,7 +4,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+import pytest
+
 transcription = importlib.import_module("ai.transcribe")
+
+
+@pytest.fixture(autouse=True)
+def _clean_model_state(monkeypatch):
+    """Every test starts with no cached model and no in-flight load thread."""
+    monkeypatch.setattr(transcription, "_model", None)
+    monkeypatch.setattr(transcription, "_load_thread", None)
+    monkeypatch.setattr(transcription, "_load_result", {})
 
 
 def test_model_initializes_only_once_under_concurrent_calls(monkeypatch):
@@ -131,4 +141,99 @@ def test_silent_video_rejects_one_sided_range(monkeypatch):
     })
     with pytest.raises(ValueError, match="Both start_seconds and end_seconds"):
         transcription.transcribe_media("silent.mp4", start_seconds=10)
+
+
+def test_model_load_is_bounded_when_the_loader_stalls(monkeypatch):
+    """A stalled model download must fail fast, not hold the model lock forever."""
+    monkeypatch.setattr(transcription, "DEFAULT_LOAD_TIMEOUT", 0.05)
+    monkeypatch.delenv("WHISPER_LOAD_TIMEOUT_SECONDS", raising=False)
+
+    class StallingWhisperModel:
+        def __init__(self, *args, **kwargs):
+            time.sleep(0.6)
+
+    monkeypatch.setattr(transcription, "WhisperModel", StallingWhisperModel)
+
+    started = time.time()
+    with pytest.raises(RuntimeError, match="did not load within"):
+        transcription.model()
+    elapsed = time.time() - started
+
+    assert elapsed < 0.5, "a stalled load must be bounded, not hang"
+    assert transcription._model is None, "a timed-out load must not be cached"
+
+
+def test_model_load_error_is_reported_and_a_later_retry_can_succeed(monkeypatch):
+    class ExplodingWhisperModel:
+        def __init__(self, *args, **kwargs):
+            raise OSError("model.bin is missing from the cache")
+
+    monkeypatch.setattr(transcription, "WhisperModel", ExplodingWhisperModel)
+    with pytest.raises(RuntimeError, match="could not be loaded") as failure:
+        transcription.model()
+
+    assert "OSError" in str(failure.value)
+    assert "model.bin is missing" in str(failure.value)
+    assert transcription._model is None, "a failed load must not poison later attempts"
+
+    class WorkingWhisperModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr(transcription, "WhisperModel", WorkingWhisperModel)
+    assert isinstance(transcription.model(), WorkingWhisperModel)
+
+
+def test_model_load_passes_local_files_only_and_caches_one_instance(monkeypatch):
+    captured = {}
+
+    class FakeWhisperModel:
+        def __init__(self, name, device=None, compute_type=None, local_files_only=None):
+            captured.update(name=name, device=device, compute=compute_type, local=local_files_only)
+
+    monkeypatch.setenv("WHISPER_MODEL", "tiny")
+    monkeypatch.setenv("WHISPER_LOCAL_FILES_ONLY", "1")
+    monkeypatch.delenv("WHISPER_DEVICE", raising=False)
+    monkeypatch.delenv("WHISPER_COMPUTE_TYPE", raising=False)
+    monkeypatch.setattr(transcription, "WhisperModel", FakeWhisperModel)
+
+    first = transcription.model()
+    second = transcription.model()
+
+    assert isinstance(first, FakeWhisperModel)
+    assert second is first
+    assert captured == {"name": "tiny", "device": "auto", "compute": "int8", "local": True}
+
+
+def test_local_files_only_defaults_off_so_first_run_downloads_still_work(monkeypatch):
+    monkeypatch.delenv("WHISPER_LOCAL_FILES_ONLY", raising=False)
+    assert transcription._env_flag("WHISPER_LOCAL_FILES_ONLY", False) is False
+
+
+def test_whisper_load_timeout_parsing_rejects_invalid_values():
+    assert transcription._positive_seconds(None, 300.0) == 300.0
+    assert transcription._positive_seconds("45", 300.0) == 45.0
+    for invalid in ("0", "-5", "nonsense", "", "inf", "nan"):
+        assert transcription._positive_seconds(invalid, 300.0) == 300.0, invalid
+
+
+def test_whisper_env_flag_parsing(monkeypatch):
+    for raw in ("1", "true", "TRUE", "yes", "on", " 1 "):
+        monkeypatch.setenv("WHISPER_LOCAL_FILES_ONLY", raw)
+        assert transcription._env_flag("WHISPER_LOCAL_FILES_ONLY", False) is True, raw
+    for raw in ("0", "false", "no", "off", "whatever", ""):
+        monkeypatch.setenv("WHISPER_LOCAL_FILES_ONLY", raw)
+        assert transcription._env_flag("WHISPER_LOCAL_FILES_ONLY", False) is False, raw
+
+
+def test_transcription_capabilities_reports_load_configuration(monkeypatch):
+    monkeypatch.setenv("WHISPER_LOCAL_FILES_ONLY", "1")
+    monkeypatch.setenv("WHISPER_LOAD_TIMEOUT_SECONDS", "42")
+
+    capabilities = transcription.transcription_capabilities()
+
+    assert capabilities["available"] is True
+    assert capabilities["localFilesOnly"] is True
+    assert capabilities["loadTimeoutSeconds"] == 42.0
+    assert capabilities["loaded"] is False
 
