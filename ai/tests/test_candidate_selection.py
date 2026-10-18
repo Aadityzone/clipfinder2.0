@@ -11,7 +11,8 @@ def test_temporal_selection_spreads_top_results_across_long_video():
 
     result = select_temporally_diverse(candidates, limit=3, min_center_distance=30)
 
-    assert [row["id"] for row in result] == ["near-a", "later", "near-b"]
+    assert [row["id"] for row in result] == ["near-a", "near-b", "later"]
+    assert "near-c" not in [row["id"] for row in result]
 
 
 def test_temporal_selection_backfills_when_video_has_few_distinct_moments():
