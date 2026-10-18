@@ -194,3 +194,26 @@ def test_dedup_clamps_invalid_threshold_to_safe_range():
         {"start": 1, "end": 9, "score": 80},
     ]
     assert len(deduplicate(items, threshold=float("nan"))) == 1
+
+
+def test_dedup_collapses_contained_windows_of_the_same_moment():
+    items = [
+        {"start": 0, "end": 24, "score": 82, "text": "setup and payoff"},
+        {"start": 8, "end": 18, "score": 91, "text": "payoff only"},
+        {"start": 40, "end": 50, "score": 65, "text": "separate moment"},
+    ]
+
+    result = deduplicate(items)
+
+    assert len(result) == 2
+    assert result[0]["score"] == 91
+    assert result[1]["start"] == 40
+
+
+def test_dedup_keeps_distinct_moments_with_small_overlap():
+    items = [
+        {"start": 0, "end": 10, "score": 90},
+        {"start": 9, "end": 19, "score": 85},
+    ]
+
+    assert len(deduplicate(items)) == 2

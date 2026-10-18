@@ -37,26 +37,12 @@ def test_evaluation_handles_empty_and_invalid_inputs():
 
 def test_aggregate_reports_are_count_weighted_and_include_macro_metrics():
     reports = [
-        {
-            "predictionCount": 2,
-            "groundTruthCount": 1,
-            "matchedCount": 1,
-            "evaluatedTopK": 2,
-            "precisionAtK": 0.5,
-            "recallAtK": 1.0,
-            "f1AtK": round(2 / 3, 4),
-            "meanMatchedIoU": 0.8,
-        },
-        {
-            "predictionCount": 10,
-            "groundTruthCount": 4,
-            "matchedCount": 2,
-            "evaluatedTopK": 5,
-            "precisionAtK": 0.4,
-            "recallAtK": 0.5,
-            "f1AtK": round(4 / 9, 4),
-            "meanMatchedIoU": 0.6,
-        },
+        {"predictionCount": 2, "groundTruthCount": 1, "matchedCount": 1,
+         "evaluatedTopK": 2, "precisionAtK": 0.5, "recallAtK": 1.0,
+         "f1AtK": round(2 / 3, 4), "meanMatchedIoU": 0.8},
+        {"predictionCount": 10, "groundTruthCount": 4, "matchedCount": 2,
+         "evaluatedTopK": 5, "precisionAtK": 0.4, "recallAtK": 0.5,
+         "f1AtK": round(4 / 9, 4), "meanMatchedIoU": 0.6},
     ]
     result = aggregate_evaluation_reports(reports)
     assert result["benchmarkCount"] == 2
@@ -73,7 +59,6 @@ def test_aggregate_empty_reports_is_safe():
     assert result["f1AtK"] == 0
 
 
-
 def test_evaluation_rejects_non_finite_timestamps_and_thresholds():
     predictions = [
         {"start": float("nan"), "end": 10, "score": 100},
@@ -85,9 +70,7 @@ def test_evaluation_rejects_non_finite_timestamps_and_thresholds():
         {"start": 1, "end": float("inf")},
         {"start": 1, "end": 4},
     ]
-    result = evaluate_ranked_candidates(
-        predictions, labels, top_k=10, iou_threshold=float("nan")
-    )
+    result = evaluate_ranked_candidates(predictions, labels, top_k=10, iou_threshold=float("nan"))
     assert result["validPredictionCount"] == 1
     assert result["groundTruthCount"] == 1
     assert result["iouThreshold"] == 0.5
@@ -95,18 +78,14 @@ def test_evaluation_rejects_non_finite_timestamps_and_thresholds():
 
 
 def test_interval_iou_rejects_non_finite_boundaries():
-    assert interval_iou(
-        {"start": 0, "end": float("inf")}, {"start": 0, "end": 5}
-    ) == 0.0
-
+    assert interval_iou({"start": 0, "end": float("inf")}, {"start": 0, "end": 5}) == 0.0
 
 
 def test_evaluator_ignores_non_object_rows_and_non_finite_scores():
     result = evaluate_ranked_candidates(
         [None, "bad", {"start": 0, "end": 5, "score": float("nan")},
          {"start": 1, "end": 4, "score": 90}],
-        [None, {"start": 1, "end": 4}],
-        top_k=10,
+        [None, {"start": 1, "end": 4}], top_k=10,
     )
     assert result["predictionCount"] == 4
     assert result["validPredictionCount"] == 2
@@ -117,9 +96,8 @@ def test_evaluator_ignores_non_object_rows_and_non_finite_scores():
 def test_aggregate_ignores_malformed_reports_and_clamps_metrics():
     result = aggregate_evaluation_reports([
         None,
-        {"predictionCount": "bad", "groundTruthCount": -2,
-         "matchedCount": float("inf"), "evaluatedTopK": 0,
-         "precisionAtK": float("nan"), "recallAtK": 2,
+        {"predictionCount": "bad", "groundTruthCount": -2, "matchedCount": float("inf"),
+         "evaluatedTopK": 0, "precisionAtK": float("nan"), "recallAtK": 2,
          "f1AtK": -1, "meanMatchedIoU": "not-a-number"},
         {"predictionCount": 3, "groundTruthCount": 2, "matchedCount": 1,
          "evaluatedTopK": 2, "precisionAtK": 0.5, "recallAtK": 0.5,
@@ -145,10 +123,39 @@ def test_evaluation_handles_unconvertible_extreme_values():
         def __float__(self):
             raise OverflowError("too large")
 
-    assert interval_iou(
-        {"start": HugeNumber(), "end": 3}, {"start": 0, "end": 3}
-    ) == 0.0
-    result = evaluate_ranked_candidates(
-        [{"start": HugeNumber(), "end": 3}], [{"start": 0, "end": 3}]
-    )
+    assert interval_iou({"start": HugeNumber(), "end": 3}, {"start": 0, "end": 3}) == 0.0
+    result = evaluate_ranked_candidates([{"start": HugeNumber(), "end": 3}], [{"start": 0, "end": 3}])
     assert result["validPredictionCount"] == 0
+
+
+def test_evaluation_reports_duplicate_rate_and_temporal_spread():
+    predictions = [
+        {"start": 0, "end": 10, "score": 90},
+        {"start": 1, "end": 9, "score": 80},
+        {"start": 100, "end": 110, "score": 70},
+    ]
+    result = evaluate_ranked_candidates(predictions, [], top_k=3, iou_threshold=0.5)
+    assert result["topKDuplicatePairRate"] == round(1 / 3, 4)
+    assert result["topKTemporalSpreadSeconds"] == 100.0
+
+
+def test_aggregate_includes_duplicate_rate_and_temporal_spread():
+    result = aggregate_evaluation_reports([
+        {"topKDuplicatePairRate": 0.25, "topKTemporalSpreadSeconds": 100},
+        {"topKDuplicatePairRate": 0.75, "topKTemporalSpreadSeconds": 300},
+    ])
+    assert result["meanTopKDuplicatePairRate"] == 0.5
+    assert result["meanTopKTemporalSpreadSeconds"] == 200.0
+
+
+
+def test_zero_iou_threshold_does_not_match_disjoint_intervals():
+    result = evaluate_ranked_candidates(
+        [{"start": 0, "end": 5, "score": 100}],
+        [{"start": 10, "end": 15}],
+        top_k=1,
+        iou_threshold=0,
+    )
+    assert result["matchedCount"] == 0
+    assert result["precisionAtK"] == 0
+    assert result["recallAtK"] == 0
