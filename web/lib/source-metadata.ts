@@ -1,7 +1,10 @@
 import { getGoogleDriveMetadata } from "./sources/google-drive";
 
 export type SourceMetadata = { title: string | null; platform: string; duration: number; thumbnail: string | null };
-const AI = process.env.AI_SERVICE_URL || "http://127.0.0.1:8000";
+
+// Keep the local fallback aligned with the documented Windows development port.
+// CI and deployed environments should set AI_SERVICE_URL explicitly.
+const AI = process.env.AI_SERVICE_URL || "http://127.0.0.1:8001";
 
 export async function getSourceMetadata(url: string, type: string, userId: string): Promise<SourceMetadata> {
   let lastError: unknown;
