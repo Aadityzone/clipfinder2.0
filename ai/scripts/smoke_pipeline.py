@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -52,6 +51,8 @@ def _number(value: Any, fallback: float = 0.0) -> float:
 def _captions_for_clip(segments: list[dict], start: float, end: float) -> list[dict]:
     cues = []
     for segment in segments:
+        if not isinstance(segment, dict):
+            continue
         seg_start = _number(segment.get("start"), -1)
         seg_end = _number(segment.get("end"), -1)
         text = str(segment.get("text") or "").strip()
@@ -67,6 +68,36 @@ def _captions_for_clip(segments: list[dict], start: float, end: float) -> list[d
             "text": text,
         })
     return cues
+
+
+def _valid_candidates(candidates: Any, duration: float) -> tuple[list[dict], int]:
+    """Validate and clamp every candidate before applying the render limit.
+
+    Invalid high-ranked entries must not consume the requested clip slots and
+    hide valid candidates later in the ranked list.
+    """
+    if not isinstance(candidates, list):
+        return [], 0
+    valid: list[tuple[int, dict, float]] = []
+    invalid_count = 0
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            invalid_count += 1
+            continue
+        raw_start = _number(candidate.get("start"), -1)
+        raw_end = _number(candidate.get("end"), -1)
+        if raw_start < 0 or raw_end <= raw_start:
+            invalid_count += 1
+            continue
+        start, end = max(0.0, raw_start), min(duration, raw_end)
+        if start >= duration or end <= start:
+            invalid_count += 1
+            continue
+        score = _number(candidate.get("score"), 0.0)
+        normalized = {**candidate, "start": start, "end": end, "score": score}
+        valid.append((index, normalized, score))
+    valid.sort(key=lambda item: (-item[2], item[0]))
+    return [item[1] for item in valid], invalid_count
 
 
 def run_pipeline(
@@ -96,6 +127,8 @@ def run_pipeline(
     except Exception as exc:
         raise SmokeStageError("transcription", exc) from exc
     segments = transcript_result.get("segments") or []
+    if not isinstance(segments, list):
+        raise SmokeStageError("transcription", TypeError("Transcription segments must be a list."))
     transcript_text = str(transcript_result.get("text") or "")
     (output_dir / "transcript.json").write_text(
         json.dumps(transcript_result, indent=2, ensure_ascii=False),
@@ -111,21 +144,16 @@ def run_pipeline(
     except Exception as exc:
         raise SmokeStageError("analysis", exc) from exc
     candidates = analysis_result.get("candidates") or []
+    normalized_candidates, invalid_candidate_count = _valid_candidates(candidates, duration)
+    render_candidates = normalized_candidates[:top]
     rendered = []
-    for index, candidate in enumerate(candidates[:max(1, min(top, 10))], start=1):
-        start = max(0.0, _number(candidate.get("start"), -1))
-        end = min(duration, _number(candidate.get("end"), -1))
-        if end <= start:
-            continue
+    for index, candidate in enumerate(render_candidates, start=1):
+        start, end = candidate["start"], candidate["end"]
         filename = f"clip-{index:02d}.mp4"
         output_path = output_dir / filename
         try:
             render(
-                str(source),
-                str(output_path),
-                start=start,
-                end=end,
-                aspect="9:16",
+                str(source), str(output_path), start=start, end=end, aspect="9:16",
                 segments=[{"start": start, "end": end}],
                 captions=_captions_for_clip(segments, start, end),
             )
@@ -145,7 +173,7 @@ def run_pipeline(
             "start": round(start, 3),
             "end": round(end, 3),
             "duration": round(end - start, 3),
-            "score": _number(candidate.get("score")),
+            "score": candidate["score"],
             "title": str(candidate.get("title") or "Untitled highlight"),
             "category": str(candidate.get("category") or "AI Detect"),
             "rationale": str(candidate.get("rationale") or ""),
@@ -169,8 +197,11 @@ def run_pipeline(
         },
         "analysis": {
             "genre": genre,
-            "candidateCount": len(candidates),
+            "candidateCount": len(candidates) if isinstance(candidates, list) else 0,
+            "validCandidateCount": len(normalized_candidates),
+            "invalidCandidateCount": invalid_candidate_count,
             "renderedCount": len(rendered),
+            "renderLimit": top,
         },
         "clips": rendered,
         "limitations": [
@@ -218,8 +249,6 @@ def main() -> int:
             "errorType": getattr(exc, "error_type", type(exc).__name__),
             "error": str(exc),
         }
-        # Keep a machine-readable failure artifact so CI failures are diagnosable
-        # even when transcription, analysis, or rendering fails before report.json.
         try:
             args.out_dir.mkdir(parents=True, exist_ok=True)
             (args.out_dir / "report.json").write_text(
