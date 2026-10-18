@@ -1,10 +1,9 @@
 # AI Engineering Handoff — Clip Finder 2.0
 
-Last updated: 2026-10-16
+Last updated: 2026-10-18
 Repository: https://github.com/Aadityzone/clipfinder2.0
-Working branch: `build/universal-genre-foundation`
-Branch HEAD when this handoff was written: `bb9bc7578f072ff1babdcb809b302cd26539f76d`
-Related PR: https://github.com/Aadityzone/clipfinder2.0/pull/19
+Working branch: `fix/ai-pipeline-recovery`
+Related PR: https://github.com/Aadityzone/clipfinder2.0/pull/32
 
 This is the working handoff for another coding agent. Read this file and the linked project docs before changing the AI pipeline. Update this handoff when meaningful code or validation status changes.
 
@@ -60,7 +59,6 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 - The genre profiles are explainable heuristics, not trained genre-specific classifiers.
 - Visual/audio event proposals are not proof that the system understands a clutch, fight, reveal, joke, or emotional context.
 - No representative human-labelled benchmark results have been established. Do not invent accuracy/precision numbers.
-- The full real-video path from a public source through persisted candidates and a playable export has not yet been confirmed end-to-end in the available handoff.
 - Provider-dependent features require real credentials/configuration. Never request or commit secrets.
 - Transcript RAG (added on the active feature branch) is request-local and uses the existing sentence-transformers dependency with CPU inference and local-cache-only model loading. It does not persist transcript embeddings or require a vector database. If the model is not installed in the local Hugging Face cache, it reports unavailable and leaves deterministic ranking intact. RAG has not been evaluated against human-labeled clip relevance data.
 - Passing unit tests or a Next.js build does not prove real-media acceptance.
@@ -75,7 +73,23 @@ Always check current GitHub HEAD and Actions before relying on this list. The br
 6. Use measured errors to improve ranking. Prioritize measured clip quality over adding arbitrary heuristic weights.
 7. Keep tests for each change and update this handoff when status changes.
 
-## Working rules for the next agent
+## Integration run (2026-10-18) — `fix/ai-pipeline-recovery`, PR #32
+
+Baseline: merged `origin/main` (editor/UI redesign from PR #16) into this branch; all conflicted files resolved keeping main's UI, AI/backend work untouched.
+
+Reliability work landed on the branch:
+
+- `beaaa23` — lease-safe job lifecycle (CAS on attempts, `startedAt: null` recovery, lease-verified checkpointing, artifact post-upload verification, oversized error truncation) plus AI hardening (malformed Whisper segment/word filtering, duration clamping, chronological output; LLM ranking index/score validation; chronological window text). Regression tests: `web/lib/jobs.test.ts`, storage artifact tests, LLM parsing tests, transcription robustness tests.
+- `6806077` — dedup/selection ownership with containment rules, duration bounds, and machine-readable rejection reasons (parallel agent commit).
+- `77fefce` — baseline merge of `origin/main`.
+
+Verification of the merged tree: web node tests 28 passed; AI suite 256 passed; `npm run typecheck` and `npm run build` (production Next build) pass.
+
+Real-media acceptance started (2026-10-18): local smoke run against Blender Foundation's CC-BY *Big Buck Bunny* (12:14, AV1+AAC) via `ai/scripts/smoke_pipeline.py --source`, exercising probe → transcription → analysis → ranking → MP4 render with no mocked outputs. Results recorded under `artifacts/ai-smoke-1018`. Record outcomes here; do not claim benchmark quality without labels.
+
+Working rules for the next agent: the active integration branch is `fix/ai-pipeline-recovery` with PR #32 targeting `main`; do not push unrelated UI changes. Keep CI green: `npm run typecheck`, `npm run test:web`, `npm run lint`, `npm run build`, and `PYTHONPATH=. pytest -q` for AI.
+
+## Working rules for the next agent (historical)
 
 - Work on `build/universal-genre-foundation` / PR #19 unless the owner explicitly requests otherwise. Do not push to `main`.
 - Fetch the latest branch HEAD before creating commits; use the actual latest SHA as the parent and update the ref with an expected-SHA guard.
