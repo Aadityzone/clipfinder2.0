@@ -316,3 +316,28 @@ def test_score_candidates_normalizes_malformed_features_before_prompt_and_update
         assert result[0]["score"] == 73.5
         assert isinstance(result[0]["features"], dict)
         assert result[0]["features"]["llmScore"] == 90.0
+
+
+def test_retrieved_context_rows_ignore_malformed_containers_and_entries():
+    assert llm._retrieved_context_rows(None, 0) == []
+    assert llm._retrieved_context_rows({0: "not-a-list"}, 0) == []
+    assert llm._retrieved_context_rows({0: [None, "bad", {"text": "Useful context"}]}, 0) == [
+        {"start": None, "end": None, "text": "Useful context"}
+    ]
+
+
+def test_score_candidates_handles_malformed_retrieved_context_and_transcript(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([{"i": 0, "score": 90, "rationale": "Clear payoff"}])
+    }))
+    candidates = [{"start": 1, "end": 8, "score": 60, "text": "A clear payoff", "features": {}}]
+
+    result = llm.score_candidates(
+        candidates,
+        None,
+        retrieved_context={0: [None, "malformed", {"text": "Relevant context"}]},
+    )
+
+    assert result[0]["score"] == 73.5
+    assert result[0]["features"]["llmScore"] == 90.0
