@@ -146,3 +146,16 @@ def test_aggregate_includes_duplicate_rate_and_temporal_spread():
     ])
     assert result["meanTopKDuplicatePairRate"] == 0.5
     assert result["meanTopKTemporalSpreadSeconds"] == 200.0
+
+
+
+def test_zero_iou_threshold_does_not_match_disjoint_intervals():
+    result = evaluate_ranked_candidates(
+        [{"start": 0, "end": 5, "score": 100}],
+        [{"start": 10, "end": 15}],
+        top_k=1,
+        iou_threshold=0,
+    )
+    assert result["matchedCount"] == 0
+    assert result["precisionAtK"] == 0
+    assert result["recallAtK"] == 0
