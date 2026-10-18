@@ -1,8 +1,11 @@
 import math
 import os
+import subprocess
 import threading
 import time
 from typing import Any
+
+import numpy as np
 
 from .services.media import ffprobe
 
@@ -20,6 +23,44 @@ _load_result: dict[str, Any] = {}
 
 DEFAULT_TRANSCRIBE_TIMEOUT = float(os.getenv("WHISPER_TIMEOUT_SECONDS", "3600"))
 DEFAULT_LOAD_TIMEOUT = float(os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS", "300"))
+
+# Whisper consumes mono 16 kHz float32 samples.
+WHISPER_SAMPLE_RATE = 16000
+
+
+def decode_audio(path: str, sample_rate: int = WHISPER_SAMPLE_RATE) -> np.ndarray:
+    """Decode any media file to mono float32 PCM at ``sample_rate`` using ffmpeg.
+
+    faster-whisper would decode this itself through PyAV, but its decoder calls
+    ``av.open(input_file, mode="r", metadata_errors="ignore")`` and the installed
+    PyAV no longer accepts that keyword, so transcription failed with
+    ``TypeError: open() got an unexpected keyword argument 'metadata_errors'``
+    before reading a single sample. ffmpeg is already a hard dependency of this
+    service, so decode here and hand Whisper an array; faster-whisper skips its
+    PyAV path entirely when the input is already a numpy array.
+
+    Keeping this as a module-level function also makes the decode step
+    replaceable in tests and keeps transcription independent of a decoder whose
+    version skew can silently break it.
+    """
+    command = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-i", path,
+        "-vn", "-ac", "1", "-ar", str(sample_rate),
+        "-f", "f32le", "-acodec", "pcm_f32le", "-",
+    ]
+    try:
+        completed = subprocess.run(command, capture_output=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"ffmpeg could not be run while decoding {path}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or b"").decode("utf-8", "replace").strip()
+        raise RuntimeError(
+            f"Audio decoding failed for {path}: "
+            f"{detail[:400] or 'ffmpeg exited with a non-zero status'}"
+        )
+    # np.frombuffer returns a read-only view; copy so downstream code may write.
+    return np.frombuffer(completed.stdout, dtype=np.float32).copy()
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -129,8 +170,13 @@ def transcription_capabilities() -> dict:
 
 def transcribe(path: str, language: str | None = None, timeout: float | None = None) -> dict:
     effective_timeout = timeout if timeout is not None else DEFAULT_TRANSCRIBE_TIMEOUT
+    # Whisper consumes mono 16 kHz float32 samples. Decode them here rather than
+    # letting faster-whisper do it: its PyAV call passes `metadata_errors` to
+    # `av.open`, which the installed PyAV no longer accepts, so every
+    # transcription request failed with TypeError before any audio was read.
+    audio = path if isinstance(path, np.ndarray) else decode_audio(path)
     segments, info = model().transcribe(
-        path,
+        audio,
         language=language,
         word_timestamps=True,
         vad_filter=True,

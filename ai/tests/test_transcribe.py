@@ -1,9 +1,12 @@
 import importlib
+import shutil
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 transcription = importlib.import_module("ai.transcribe")
@@ -40,13 +43,19 @@ def test_model_initializes_only_once_under_concurrent_calls(monkeypatch):
 def test_transcribe_preserves_segment_and_word_timestamps(monkeypatch):
     word = SimpleNamespace(start=1.2, end=1.6, word=" hello", probability=0.97)
     segment = SimpleNamespace(start=1.0, end=2.0, text=" hello world ", words=[word])
-    fake_model = SimpleNamespace(
-        transcribe=lambda path, **kwargs: (
-            iter([segment]),
-            SimpleNamespace(language="en", duration=12.5),
-        )
+    decoded = np.zeros(16000, dtype=np.float32)
+    received = {}
+
+    def fake_transcribe(audio, **kwargs):
+        received["audio"] = audio
+        received["kwargs"] = kwargs
+        return iter([segment]), SimpleNamespace(language="en", duration=12.5)
+
+    monkeypatch.setattr(transcription, "_model", SimpleNamespace(transcribe=fake_transcribe))
+    decoded_paths = []
+    monkeypatch.setattr(
+        transcription, "decode_audio", lambda path: (decoded_paths.append(path), decoded)[1]
     )
-    monkeypatch.setattr(transcription, "_model", fake_model)
 
     result = transcription.transcribe("source.mp4", language="en")
 
@@ -55,6 +64,93 @@ def test_transcribe_preserves_segment_and_word_timestamps(monkeypatch):
     assert result["duration"] == 12.5
     assert result["segments"][0]["start"] == 1.0
     assert result["segments"][0]["words"][0]["confidence"] == 0.97
+
+    # The audio is decoded by this service and handed to Whisper as an array,
+    # which is what keeps transcription off faster-whisper's PyAV decoder.
+    assert decoded_paths == ["source.mp4"]
+    assert received["audio"] is decoded
+    assert received["kwargs"]["word_timestamps"] is True
+    assert received["kwargs"]["vad_filter"] is True
+
+
+def test_transcribe_accepts_an_already_decoded_array(monkeypatch):
+    decoded = np.zeros(8000, dtype=np.float32)
+    monkeypatch.setattr(
+        transcription,
+        "decode_audio",
+        lambda _path: (_ for _ in ()).throw(AssertionError("must not re-decode an array")),
+    )
+    monkeypatch.setattr(transcription, "_model", SimpleNamespace(
+        transcribe=lambda audio, **kwargs: (iter([]), SimpleNamespace(language="en", duration=0.5))
+    ))
+
+    result = transcription.transcribe(decoded, language="en")
+
+    assert result["segments"] == []
+    assert result["duration"] == 0.5
+
+
+def test_transcribe_never_uses_the_faster_whisper_pyav_decoder(monkeypatch):
+    """Regression guard for the PyAV incompatibility that broke all transcription.
+
+    faster-whisper calls ``av.open(..., metadata_errors="ignore")``, a keyword the
+    installed PyAV rejects. Passing a decoded array must bypass that call.
+    """
+    import faster_whisper.transcribe as fw_transcribe
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("faster-whisper's PyAV decoder must not be used")
+
+    monkeypatch.setattr(fw_transcribe, "decode_audio", forbidden)
+    monkeypatch.setattr(transcription, "decode_audio", lambda _path: np.zeros(16000, dtype=np.float32))
+    monkeypatch.setattr(transcription, "_model", SimpleNamespace(
+        transcribe=lambda audio, **kwargs: (iter([]), SimpleNamespace(language="en", duration=1.0))
+    ))
+
+    assert transcription.transcribe("source.mp4")["text"] == ""
+
+
+def test_decode_audio_reports_ffmpeg_failure_detail(monkeypatch):
+    class Completed:
+        returncode = 1
+        stdout = b""
+        stderr = b"Invalid data found when processing input"
+
+    monkeypatch.setattr(transcription.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    with pytest.raises(RuntimeError, match="Audio decoding failed") as failure:
+        transcription.decode_audio("broken.mp4")
+
+    assert "Invalid data found" in str(failure.value)
+
+
+def test_decode_audio_reports_a_missing_ffmpeg_binary(monkeypatch):
+    def explode(*_args, **_kwargs):
+        raise FileNotFoundError("ffmpeg was not found")
+
+    monkeypatch.setattr(transcription.subprocess, "run", explode)
+
+    with pytest.raises(RuntimeError, match="ffmpeg could not be run"):
+        transcription.decode_audio("anything.mp4")
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required to decode media")
+def test_decode_audio_returns_mono_float32_at_16khz(tmp_path):
+    sample = tmp_path / "tone.wav"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-ac", "2", "-ar", "44100", str(sample)],
+        check=True, capture_output=True,
+    )
+
+    audio = transcription.decode_audio(str(sample))
+
+    assert audio.dtype == np.float32
+    assert audio.ndim == 1, "audio must be downmixed to mono"
+    assert audio.flags.writeable, "downstream code may need to modify the samples"
+    assert abs(audio.shape[0] - 16000) <= 200, "must be resampled to 16 kHz"
+    assert float(np.max(np.abs(audio))) > 0.1, "the decoded tone must not be silent"
 
 
 def test_transcription_range_validates_one_hour_limit():
@@ -95,6 +191,7 @@ def test_transcribe_timeout_raises_runtime_error(monkeypatch):
 
     fake_model = SimpleNamespace(transcribe=slow_transcribe)
     monkeypatch.setattr(transcription, "_model", fake_model)
+    monkeypatch.setattr(transcription, "decode_audio", lambda _path: np.zeros(1600, dtype=np.float32))
     try:
         transcription.transcribe("dummy.mp4", timeout=0.01)
     except RuntimeError as exc:
