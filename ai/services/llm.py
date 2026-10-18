@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import os
 from urllib.request import Request, urlopen
 
@@ -120,13 +121,22 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
     for item in parsed:
         if not isinstance(item, dict):
             continue
-        index = item.get("i")
+        raw_index = item.get("i")
+        # JSON model output must identify a candidate with an exact integer index.
+        # Do not silently coerce booleans or fractional numbers (e.g. 2.9 -> 2).
+        if isinstance(raw_index, bool):
+            continue
+        if isinstance(raw_index, int):
+            index = raw_index
+        elif isinstance(raw_index, str) and raw_index.strip().isdigit():
+            index = int(raw_index.strip())
+        else:
+            continue
         try:
-            index = int(index)
             score = float(item.get("score"))
         except (TypeError, ValueError, OverflowError):
             continue
-        if index < 0 or not 0 <= score <= 100:
+        if index < 0 or not math.isfinite(score) or not 0 <= score <= 100:
             continue
         ranking = {
             "score": score,
@@ -135,7 +145,10 @@ def _parse_rankings(raw: str) -> dict[int, dict]:
         title = item.get("title")
         if isinstance(title, str) and title.strip():
             ranking["title"] = title.strip()[:120]
-        ranked[index] = ranking
+        # Duplicate model rows are ambiguous; retain the strongest valid score
+        # instead of letting a later duplicate silently downgrade it.
+        if index not in ranked or score > ranked[index]["score"]:
+            ranked[index] = ranking
     return ranked
 
 
