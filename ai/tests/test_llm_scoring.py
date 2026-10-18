@@ -293,3 +293,26 @@ def test_non_finite_candidate_score_is_not_blended_with_model_score(monkeypatch)
     assert result[0]["score"] != result[0]["score"]  # remains NaN; never treated as a valid score
     assert "llmScore" not in result[0]["features"]
     assert result[0]["features"]["llmRanking"]["status"] == "unavailable"
+
+
+def test_score_candidates_normalizes_malformed_features_before_prompt_and_update(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(llm, "urlopen", lambda *_args, **_kwargs: _FakeResponse({
+        "output_text": json.dumps([
+            {"i": 0, "score": 90, "rationale": "Clear payoff"},
+        ])
+    }))
+    for malformed_features in (None, "not-a-dict", 42):
+        candidates = [{
+            "start": 1,
+            "end": 8,
+            "score": 60,
+            "text": "A clear payoff",
+            "features": malformed_features,
+        }]
+
+        result = llm.score_candidates(candidates, "A clear payoff")
+
+        assert result[0]["score"] == 73.5
+        assert isinstance(result[0]["features"], dict)
+        assert result[0]["features"]["llmScore"] == 90.0
