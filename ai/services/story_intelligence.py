@@ -111,6 +111,58 @@ def _punctuated_word_bounds(segments: list[dict], start: float, end: float) -> t
     return start, end
 
 
+def _trim_dead_air(
+    segments: list[dict],
+    start: float,
+    end: float,
+    min_duration: float = 12.0,
+    max_duration: float = 75.0,
+) -> tuple[float, float]:
+    """Trim excessive leading (>1.5s) or trailing (>2.0s) silence if word timestamps exist."""
+    words: list[tuple[float, float]] = []
+    if not isinstance(segments, list):
+        return start, end
+    for segment in segments:
+        if not isinstance(segment, dict) or not isinstance(segment.get("words"), list):
+            continue
+        for word in segment["words"]:
+            if not isinstance(word, dict):
+                continue
+            try:
+                ws, we = float(word["start"]), float(word["end"])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(ws) and math.isfinite(we) and ws >= 0 and we > ws:
+                if we >= start and ws <= end:
+                    words.append((ws, we))
+
+    if not words:
+        return start, end
+
+    words.sort(key=lambda item: item[0])
+    first_word_start = words[0][0]
+    last_word_end = words[-1][1]
+
+    new_start = start
+    new_end = end
+
+    # If silence before first word exceeds 1.5s, tighten start with a comfortable 0.35s lead-in
+    lead_silence = first_word_start - start
+    if lead_silence > 1.5:
+        target_start = max(start, first_word_start - 0.35)
+        if (new_end - target_start) >= min_duration:
+            new_start = target_start
+
+    # If silence after last word exceeds 2.0s, tighten end with a comfortable 0.5s pad
+    trail_silence = end - last_word_end
+    if trail_silence > 2.0:
+        target_end = min(end, last_word_end + 0.5)
+        if (target_end - new_start) >= min_duration:
+            new_end = target_end
+
+    return max(0.0, new_start), max(new_start, new_end)
+
+
 def _valid_segments(segments):
     valid = []
     if not isinstance(segments, list):
@@ -171,6 +223,9 @@ def find_boundaries(segments: list[dict], anchor_index: int, min_duration=12.0, 
         start, end = bounded_start, bounded_end
     if end - start < minimum:
         end = min(float(segments[-1]["end"]), start + minimum)
+
+    # Trim excessive leading or trailing dead air if word timestamps exist
+    start, end = _trim_dead_air(segments, start, end, min_duration=minimum, max_duration=maximum)
     return max(0.0, start), max(start, end)
 
 
