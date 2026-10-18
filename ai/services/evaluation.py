@@ -25,13 +25,7 @@ def interval_iou(a: dict[str, Any], b: dict[str, Any]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def evaluate_ranked_candidates(
-    predictions: Sequence[dict[str, Any]],
-    ground_truth: Sequence[dict[str, Any]],
-    *,
-    top_k: int = 10,
-    iou_threshold: float = 0.5,
-) -> dict[str, Any]:
+def evaluate_ranked_candidates(predictions: Sequence[dict[str, Any]], ground_truth: Sequence[dict[str, Any]], *, top_k: int = 10, iou_threshold: float = 0.5) -> dict[str, Any]:
     """Match top-ranked predictions to unique labels and report quality/coverage diagnostics."""
     try:
         k = max(1, int(top_k))
@@ -60,7 +54,8 @@ def evaluate_ranked_candidates(
         if not options:
             continue
         overlap, index = max(options)
-        if overlap >= threshold:
+        # A zero threshold must not turn disjoint intervals into true matches.
+        if overlap > 0 and overlap >= threshold:
             matched_labels.add(index)
             matched_predictions += 1
             ious.append(overlap)
@@ -70,10 +65,8 @@ def evaluate_ranked_candidates(
     f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
     pair_count = len(ranked) * (len(ranked) - 1) // 2
     duplicate_pairs = sum(
-        1
-        for i, left in enumerate(ranked)
-        for right in ranked[i + 1:]
-        if interval_iou(left, right) >= threshold and threshold > 0
+        1 for i, left in enumerate(ranked) for right in ranked[i + 1:]
+        if threshold > 0 and interval_iou(left, right) >= threshold
     )
     centers = sorted((float(p["start"]) + float(p["end"])) / 2 for p in ranked)
     return {
@@ -103,29 +96,22 @@ def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str,
             "macroRecallAtK": 0.0, "macroF1AtK": 0.0, "meanMatchedIoU": 0.0,
             "meanTopKDuplicatePairRate": 0.0, "meanTopKTemporalSpreadSeconds": 0.0,
         }
-
-    prediction_count = sum(_nonnegative_int(report.get("predictionCount")) for report in reports)
-    ground_truth_count = sum(_nonnegative_int(report.get("groundTruthCount")) for report in reports)
-    matched_count = sum(_nonnegative_int(report.get("matchedCount")) for report in reports)
-    evaluated_count = sum(_nonnegative_int(report.get("evaluatedTopK")) for report in reports)
+    prediction_count = sum(_nonnegative_int(r.get("predictionCount")) for r in reports)
+    ground_truth_count = sum(_nonnegative_int(r.get("groundTruthCount")) for r in reports)
+    matched_count = sum(_nonnegative_int(r.get("matchedCount")) for r in reports)
+    evaluated_count = sum(_nonnegative_int(r.get("evaluatedTopK")) for r in reports)
     precision = matched_count / evaluated_count if evaluated_count else 0.0
     recall = matched_count / ground_truth_count if ground_truth_count else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    matched_iou_weight = sum(
-        _bounded_metric(report.get("meanMatchedIoU")) * _nonnegative_int(report.get("matchedCount"))
-        for report in reports
-    )
-    macro_precision = sum(_bounded_metric(r.get("precisionAtK")) for r in reports) / len(reports)
-    macro_recall = sum(_bounded_metric(r.get("recallAtK")) for r in reports) / len(reports)
-    macro_f1 = sum(_bounded_metric(r.get("f1AtK")) for r in reports) / len(reports)
-
+    matched_iou_weight = sum(_bounded_metric(r.get("meanMatchedIoU")) * _nonnegative_int(r.get("matchedCount")) for r in reports)
     return {
         "benchmarkCount": len(reports), "predictionCount": prediction_count,
         "groundTruthCount": ground_truth_count, "matchedCount": matched_count,
         "evaluatedTopK": evaluated_count, "precisionAtK": round(precision, 4),
         "recallAtK": round(recall, 4), "f1AtK": round(f1, 4),
-        "macroPrecisionAtK": round(macro_precision, 4),
-        "macroRecallAtK": round(macro_recall, 4), "macroF1AtK": round(macro_f1, 4),
+        "macroPrecisionAtK": round(sum(_bounded_metric(r.get("precisionAtK")) for r in reports) / len(reports), 4),
+        "macroRecallAtK": round(sum(_bounded_metric(r.get("recallAtK")) for r in reports) / len(reports), 4),
+        "macroF1AtK": round(sum(_bounded_metric(r.get("f1AtK")) for r in reports) / len(reports), 4),
         "meanMatchedIoU": round(matched_iou_weight / matched_count, 4) if matched_count else 0.0,
         "meanTopKDuplicatePairRate": round(sum(_bounded_metric(r.get("topKDuplicatePairRate")) for r in reports) / len(reports), 4),
         "meanTopKTemporalSpreadSeconds": round(sum(_nonnegative_float(r.get("topKTemporalSpreadSeconds")) for r in reports) / len(reports), 3),
@@ -157,9 +143,7 @@ def _nonnegative_int(value: Any) -> int:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
         return 0
-    if not math.isfinite(number) or number < 0:
-        return 0
-    return int(number)
+    return int(number) if math.isfinite(number) and number >= 0 else 0
 
 
 def _nonnegative_float(value: Any) -> float:
