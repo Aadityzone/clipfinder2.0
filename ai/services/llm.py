@@ -229,6 +229,12 @@ def _request_body(model: str, prompt: dict, frame_urls: dict[int, str] | None = 
     }).encode()
 
 
+def _candidate_features(candidate: dict) -> dict:
+    """Return candidate feature metadata only when it has the expected shape."""
+    features = candidate.get("features")
+    return features if isinstance(features, dict) else {}
+
+
 def score_candidates(
     candidates: list[dict],
     transcript: str,
@@ -268,16 +274,16 @@ def score_candidates(
         "text": c.get("text", ""),
         "category": c.get("category"),
         "features": {
-            "hookSignals": c.get("features", {}).get("hookSignals", {}),
-            "audioEnergy": c.get("features", {}).get("audioEnergy", 0),
-            "sceneHits": c.get("features", {}).get("sceneHits", 0),
-            "faceHits": c.get("features", {}).get("faceHits", 0),
-            "visualChange": c.get("features", {}).get("visualChange", 0),
-            "motion": c.get("features", {}).get("motion", 0),
-            "gameplayLikeRatio": c.get("features", {}).get("gameplayLikeRatio", 0),
-            "onScreenActionLabels": c.get("features", {}).get("onScreenActionLabels", []),
-            "eventKind": c.get("features", {}).get("eventKind"),
-            "eventStrength": c.get("features", {}).get("eventStrength", 0),
+            "hookSignals": _candidate_features(c).get("hookSignals", {}),
+            "audioEnergy": _candidate_features(c).get("audioEnergy", 0),
+            "sceneHits": _candidate_features(c).get("sceneHits", 0),
+            "faceHits": _candidate_features(c).get("faceHits", 0),
+            "visualChange": _candidate_features(c).get("visualChange", 0),
+            "motion": _candidate_features(c).get("motion", 0),
+            "gameplayLikeRatio": _candidate_features(c).get("gameplayLikeRatio", 0),
+            "onScreenActionLabels": _candidate_features(c).get("onScreenActionLabels", []),
+            "eventKind": _candidate_features(c).get("eventKind"),
+            "eventStrength": _candidate_features(c).get("eventStrength", 0),
         },
         "retrieved_transcript_context": [
             {"start": row.get("start"), "end": row.get("end"), "text": str(row.get("text", ""))[:800]}
