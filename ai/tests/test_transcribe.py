@@ -40,6 +40,42 @@ def test_model_initializes_only_once_under_concurrent_calls(monkeypatch):
     assert all(instance is models[0] for instance in models)
 
 
+def test_transcribe_discards_invalid_times_and_bounds_words_to_segments(monkeypatch):
+    valid = SimpleNamespace(
+        start=2.0,
+        end=5.0,
+        text=" valid segment ",
+        words=[
+            SimpleNamespace(start=1.9, end=2.2, word=" edge", probability=0.9),
+            SimpleNamespace(start=3.0, end=2.5, word=" reversed", probability=0.8),
+            SimpleNamespace(start=4.8, end=5.2, word=" clipped", probability=float("nan")),
+            SimpleNamespace(start=float("inf"), end=5.0, word=" invalid", probability=0.5),
+        ],
+    )
+    invalid = SimpleNamespace(start=float("nan"), end=6.0, text="not timed", words=[])
+    beyond_duration = SimpleNamespace(start=10.0, end=11.0, text="outside", words=[])
+    out_of_order = SimpleNamespace(start=0.5, end=1.5, text="first", words=[])
+    fake_model = SimpleNamespace(
+        transcribe=lambda *_args, **_kwargs: (
+            iter([valid, invalid, beyond_duration, out_of_order]),
+            SimpleNamespace(language="en", duration=8.0),
+        )
+    )
+    monkeypatch.setattr(transcription, "_model", fake_model)
+    monkeypatch.setattr(
+        transcription, "decode_audio", lambda _path: np.zeros(16000, dtype=np.float32)
+    )
+
+    result = transcription.transcribe("source.mp4")
+
+    assert [(row["start"], row["end"]) for row in result["segments"]] == [(0.5, 1.5), (2.0, 5.0)]
+    assert result["text"] == "first valid segment"
+    assert result["segments"][1]["words"] == [
+        {"start": 2.0, "end": 2.2, "word": " edge", "confidence": 0.9},
+        {"start": 4.8, "end": 5.0, "word": " clipped", "confidence": None},
+    ]
+
+
 def test_transcribe_preserves_segment_and_word_timestamps(monkeypatch):
     word = SimpleNamespace(start=1.2, end=1.6, word=" hello", probability=0.97)
     segment = SimpleNamespace(start=1.0, end=2.0, text=" hello world ", words=[word])
