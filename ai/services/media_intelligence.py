@@ -6,13 +6,20 @@ from .audio_intelligence import loudness_windows
 from .visual_intelligence import sample_visual_features
 from .action_intelligence import analyze_on_screen
 
-def audio_features(path: str) -> dict:
+import time
+
+def audio_features(path: str) -> tuple[dict, list]:
     if not os.path.isfile(path):
-        return {}
-    p = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-i", path, "-af", "volumedetect", "-f", "null", "-"],
-        capture_output=True, text=True
-    )
+        return {}, []
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", path, "-af", "volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=300
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {"meanDb": None, "peakDb": None, "durationS": None, "windowCount": 0}, []
+    if p.returncode != 0:
+        return {"meanDb": None, "peakDb": None, "durationS": None, "windowCount": 0}, []
     text = p.stderr
     mean = re.search(r"mean_volume:\s*(-?[0-9.]+) dB", text)
     peak = re.search(r"max_volume:\s*(-?[0-9.]+) dB", text)
@@ -56,7 +63,10 @@ def face_features(path: str) -> dict:
     cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     samples, t = [], 0.0
     step = max(1.0, min(3.0, duration / 60 if duration else 3.0))
+    start_time = time.time()
     while t < duration and len(samples) < 180:
+        if time.time() - start_time > 60:
+            break
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
         ok, frame = cap.read()
         if ok:

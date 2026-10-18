@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import os
+import time
 from threading import Lock
 from typing import Any
 
@@ -8,6 +7,7 @@ from faster_whisper import WhisperModel
 
 _model: Any = None
 _model_lock = Lock()
+DEFAULT_TRANSCRIBE_TIMEOUT = float(os.getenv("WHISPER_TIMEOUT_SECONDS", "3600"))
 
 
 def model():
@@ -26,7 +26,8 @@ def model():
     return _model
 
 
-def transcribe(path: str, language: str | None = None) -> dict:
+def transcribe(path: str, language: str | None = None, timeout: float | None = None) -> dict:
+    effective_timeout = timeout if timeout is not None else DEFAULT_TRANSCRIBE_TIMEOUT
     segments, info = model().transcribe(
         path,
         language=language,
@@ -35,7 +36,10 @@ def transcribe(path: str, language: str | None = None) -> dict:
     )
     output = []
     text_parts = []
+    start_time = time.time()
     for segment in segments:
+        if effective_timeout and (time.time() - start_time) > effective_timeout:
+            raise RuntimeError(f"Whisper transcription timed out after {int(effective_timeout)}s")
         words = []
         for word in segment.words or []:
             words.append({

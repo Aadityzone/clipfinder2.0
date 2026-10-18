@@ -74,3 +74,21 @@ def test_transcription_range_restores_absolute_word_timestamps(monkeypatch):
     assert result["sourceEndS"] == 602
     assert result["segments"][0]["start"] == 600.5
     assert result["segments"][0]["words"][0]["end"] == 601.0
+
+
+def test_transcribe_timeout_raises_runtime_error(monkeypatch):
+    def slow_transcribe(*args, **kwargs):
+        def seg_gen():
+            time.sleep(0.05)
+            yield SimpleNamespace(start=0.0, end=1.0, text="test", words=[])
+        return seg_gen(), SimpleNamespace(language="en", duration=1.0)
+
+    fake_model = SimpleNamespace(transcribe=slow_transcribe)
+    monkeypatch.setattr(transcription, "_model", fake_model)
+    try:
+        transcription.transcribe("dummy.mp4", timeout=0.01)
+    except RuntimeError as exc:
+        assert "timed out" in str(exc)
+    else:
+        raise AssertionError("Expected transcribe to time out")
+

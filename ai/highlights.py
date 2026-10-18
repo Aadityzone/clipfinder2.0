@@ -2,12 +2,12 @@ import math
 import re
 
 CUES = {
-    "funny": ["laugh", "laughed", "hilarious", "funny", "joke", "roast"],
-    "reaction": ["oh my", "what", "no way", "wait", "wow", "bro", "damn"],
-    "drama": ["serious", "never", "can't believe", "crazy", "fight", "angry"],
+    "funny": ["laugh", "laughed", "hilarious", "funny", "joke", "roast", "lmao", "lol", "ridiculous", "comedy", "cracking up", "too good"],
+    "reaction": ["oh my", "what", "no way", "wait", "wow", "bro", "damn", "holy", "omg", "are you serious", "unbelievable", "insane", "look at that", "what the"],
+    "drama": ["serious", "never", "can't believe", "crazy", "fight", "angry", "betrayal", "argument", "exposed", "shocking", "threat", "conflict"],
     "quotable": ["the truth", "remember", "lesson", "important", "meaning", "realize"],
-    "unexpected": ["actually", "turns out", "didn't know", "surprise", "unexpected"],
-    "fail / win": ["win", "won", "lost", "fail", "failed", "victory", "clutch"],
+    "unexpected": ["actually", "turns out", "didn't know", "surprise", "unexpected", "plot twist", "who knew", "sudden", "never expected", "out of nowhere"],
+    "fail / win": ["win", "won", "lost", "fail", "failed", "victory", "clutch", "choke", "game over", "comeback", "ace", "epic", "legendary"],
     "wholesome": ["love", "proud", "thank", "kind", "family", "helped"],
 }
 ALIASES = {"ai detect": "ai_detect", "fail/win": "fail / win"}

@@ -77,18 +77,32 @@ def loudness_windows(path: str, window: float = 5.0) -> list[dict]:
                 "energy": energy,
             })
             elapsed += actual_length
-        process.wait()
+        if process.stdout is not None and not getattr(process.stdout, "closed", False):
+            process.stdout.close()
+        try:
+            process.wait(timeout=5)
+        except TypeError:
+            process.wait()
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except (TypeError, subprocess.SubprocessError):
+                pass
         if process.returncode and not rows:
             return []
     except (OSError, subprocess.SubprocessError):
         return rows
     finally:
         if process is not None:
+            if process.stdout is not None and not getattr(process.stdout, "closed", False):
+                process.stdout.close()
             if process.poll() is None:
                 process.kill()
-                process.wait()
-            if process.stdout is not None:
-                process.stdout.close()
+                try:
+                    process.wait(timeout=2)
+                except (TypeError, subprocess.SubprocessError):
+                    pass
     return rows
 
 

@@ -86,6 +86,7 @@ def render(
                     "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=1800,
             )
             return
 
@@ -102,6 +103,7 @@ def render(
                         "-movflags", "+faststart", part_path,
                     ],
                     check=True,
+                    timeout=1800,
                 )
                 parts.append(part_path)
 
@@ -116,6 +118,7 @@ def render(
                     "-c", "copy", "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=1800,
             )
 
     if not captions:
@@ -137,4 +140,5 @@ def render(
                 "-c:a", "copy", "-movflags", "+faststart", output_path,
             ],
             check=True,
+            timeout=1800,
         )

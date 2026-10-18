@@ -10,9 +10,9 @@ class StorySignals:
     completeness: float
     conversational: float
 
-HOOKS = ("wait", "what", "why", "how", "listen", "okay", "so", "here's", "the thing")
-TENSION = ("but", "however", "except", "until", "problem", "wrong", "failed", "couldn't", "never", "worried")
-PAYOFF = ("because", "therefore", "finally", "turns out", "realized", "won", "lost", "actually", "so that's", "that's why")
+HOOKS = ("wait", "what", "why", "how", "listen", "okay", "so", "here's", "the thing", "guess what", "watch this", "look at", "check this out", "did you see")
+TENSION = ("but", "however", "except", "until", "problem", "wrong", "failed", "couldn't", "never", "worried", "suddenly", "all of a sudden", "close call", "scary", "intense")
+PAYOFF = ("because", "therefore", "finally", "turns out", "realized", "won", "lost", "actually", "so that's", "that's why", "insane", "crazy", "unreal", "let's go", "clutch", "omg")
 
 def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-z0-9']+", text.lower()) if isinstance(text, str) else []
@@ -46,14 +46,22 @@ def analyze_story(text: str, duration: float, before_text: str = "", after_text:
         duration_value = 0.0
     if not math.isfinite(duration_value) or duration_value < 0:
         duration_value = 0.0
-    hook = min(1, _hit_score(text, HOOKS) * .65 + min(1, text.count("?") / 2) * .35)
+    hook = min(1.0, _hit_score(text, HOOKS) * .65 + min(1.0, text.count("?") / 2) * .35)
     tension = _hit_score(text, TENSION)
-    payoff = _hit_score(text, PAYOFF) * .75 + min(1, len(tokens) / 90) * .25
-    conversational = min(1, (text.count("?") + text.count("!") + sum(1 for token in tokens if token in {"you", "your", "i", "we", "us", "our"})) / 8)
+    setup_in_before = (
+        ("?" in before_text or _hit_score(before_text, HOOKS) > 0.3)
+        if isinstance(before_text, str) and before_text
+        else False
+    )
+    payoff_bonus = 0.1 if (setup_in_before and _hit_score(text, PAYOFF) > 0.3) else 0.0
+    self_contained_bonus = 0.1 if (hook > 0.4 and (tension > 0.3 or _hit_score(text, PAYOFF) > 0.3)) else 0.0
+
+    payoff = min(1.0, _hit_score(text, PAYOFF) * .75 + min(1.0, len(tokens) / 90) * .25 + payoff_bonus)
+    conversational = min(1.0, (text.count("?") + text.count("!") + sum(1 for token in tokens if token in {"you", "your", "i", "we", "us", "our"})) / 8)
     # Standalone completeness rewards enough context but penalizes excessively long clips.
-    context = min(1, len(tokens) / 55)
-    length_penalty = max(0, min(1, (duration_value - 75) / 120))
-    completeness = min(1, context * .65 + payoff * .25 + (1 - length_penalty) * .10)
+    context = min(1.0, len(tokens) / 55)
+    length_penalty = max(0.0, min(1.0, (duration_value - 75) / 120))
+    completeness = min(1.0, context * .60 + payoff * .25 + (1.0 - length_penalty) * .10 + self_contained_bonus)
     return StorySignals(hook, tension, payoff, completeness, conversational)
 
 def story_score(signals: StorySignals) -> float:
@@ -195,7 +203,15 @@ def optimize_candidates(segments: list[dict], candidates: list[dict]) -> list[di
             str(segment.get("text", "")).strip() for segment in segments
             if float(segment["end"]) > start and float(segment["start"]) < end
         ).strip()
-        signals = analyze_story(text, end - start)
+        before_text = " ".join(
+            str(segment.get("text", "")).strip() for segment in segments
+            if float(segment["end"]) <= start and float(segment["end"]) >= start - 20.0
+        ).strip()
+        after_text = " ".join(
+            str(segment.get("text", "")).strip() for segment in segments
+            if float(segment["start"]) >= end and float(segment["start"]) <= end + 20.0
+        ).strip()
+        signals = analyze_story(text, end - start, before_text=before_text, after_text=after_text)
         score = story_score(signals)
         candidate = dict(raw_candidate)
         candidate["start"] = start

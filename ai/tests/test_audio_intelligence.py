@@ -67,3 +67,36 @@ def test_loudness_windows_streams_pcm_through_one_ffmpeg_process(monkeypatch, tm
 
 def test_loudness_windows_returns_empty_for_missing_media(tmp_path):
     assert audio.loudness_windows(str(tmp_path / "missing.mp4")) == []
+
+
+def test_loudness_windows_handles_process_timeout(monkeypatch, tmp_path):
+    media = tmp_path / "source.mp4"
+    media.write_bytes(b"media")
+    monkeypatch.setattr(audio.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout="10.0"
+    ))
+    pcm = np.full(8000 * 5, 0.5, dtype="<f4").tobytes()
+
+    class HangingProcess:
+        def __init__(self):
+            self.stdout = io.BytesIO(pcm)
+            self.returncode = None
+            self.killed = False
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired("ffmpeg", 5)
+            self.returncode = -9
+            return -9
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    monkeypatch.setattr(audio.subprocess, "Popen", lambda *args, **kwargs: HangingProcess())
+    result = audio.loudness_windows(str(media))
+    assert len(result) >= 1
+

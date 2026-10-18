@@ -8,6 +8,7 @@ required and unavailable models are reported instead of faking results.
 from __future__ import annotations
 
 import os
+import time
 from functools import lru_cache
 
 import cv2
@@ -55,7 +56,10 @@ def sample_visual_features(path: str, max_samples: int = 180) -> dict:
     previous = None
     previous_sig = None
     t = 0.0
+    start_time = time.time()
     while t < duration and len(samples) < max_samples:
+        if time.time() - start_time > 60:
+            break
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
         ok, frame = cap.read()
         if not ok:

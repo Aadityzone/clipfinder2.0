@@ -7,6 +7,16 @@ def test_story_signals_reward_payoff():
     assert strong.payoff > weak.payoff
     assert strong.hook > weak.hook
 
+
+def test_story_signals_reward_setup_resolution_from_prior_context():
+    before_setup = "Why did the engine suddenly stop working? Can anyone explain?"
+    payoff_text = "Because the fuel line was completely disconnected, so that's why it failed."
+    signals_with_context = analyze_story(payoff_text, 20, before_text=before_setup)
+    signals_without_context = analyze_story(payoff_text, 20)
+    assert signals_with_context.payoff >= signals_without_context.payoff
+    assert story_score(signals_with_context) >= story_score(signals_without_context)
+
+
 def test_boundaries_include_context():
     segments = [
         {"start": 0, "end": 4, "text": "Earlier setup."},
