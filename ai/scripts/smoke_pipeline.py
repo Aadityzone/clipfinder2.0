@@ -27,6 +27,7 @@ from typing import Any
 
 from ai.main import AnalyzeRequest, analyze
 from ai.services.download import download
+from ai.services.evaluation import selection_diagnostics
 from ai.services.media import ffprobe
 from ai.services.render import render
 from ai.transcribe import transcribe
@@ -171,10 +172,12 @@ def run_pipeline(
             "genre": genre,
             "candidateCount": len(candidates),
             "renderedCount": len(rendered),
+            "selection": selection_diagnostics(candidates, media_duration=duration),
         },
         "clips": rendered,
         "limitations": [
             "A successful smoke test proves the tested source completed the local pipeline; it does not prove highlight quality across all genres.",
+            "The analysis.selection block measures structural shape (duplicate rate, temporal coverage, clustering) in the delivered order. It is not a quality score.",
             "Use human-labelled benchmarks to measure precision and recall.",
         ],
     }

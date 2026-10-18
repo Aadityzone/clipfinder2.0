@@ -150,3 +150,45 @@ def test_smoke_invalid_source_metadata_is_reported_as_media_probe_failure(monkey
 
     assert failure.value.stage == "media_probe"
     assert failure.value.error_type == "RuntimeError"
+
+
+def test_smoke_report_includes_label_free_selection_diagnostics(monkeypatch, tmp_path):
+    """The smoke report must expose selection shape without claiming quality."""
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    output = tmp_path / "out"
+    monkeypatch.setattr(
+        smoke_pipeline,
+        "ffprobe",
+        lambda candidate: {"duration": 3600.0, "width": 1280, "height": 720, "hasAudio": True}
+        if str(candidate).endswith("source.mp4")
+        else {"duration": 12.0, "width": 1080, "height": 1920, "hasAudio": True},
+    )
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: {
+        "language": "en", "text": "hello",
+        "segments": [{"start": 1, "end": 3, "text": "hello"}],
+    })
+    # Two candidates clustered in the first two minutes of a one-hour source.
+    monkeypatch.setattr(smoke_pipeline, "analyze", lambda *_args: {"candidates": [
+        {"start": 10.0, "end": 25.0, "score": 95, "title": "A", "category": "AI Detect"},
+        {"start": 40.0, "end": 55.0, "score": 94, "title": "B", "category": "AI Detect"},
+        {"start": 200.0, "end": 215.0, "score": 93, "title": "C", "category": "AI Detect"},
+    ]})
+    def fake_render(_source, output_path, **_kwargs):
+        from pathlib import Path
+        Path(output_path).write_bytes(b"x" * 2048)
+    monkeypatch.setattr(smoke_pipeline, "render", fake_render)
+
+    report = smoke_pipeline.run_pipeline(source, output, top=2)
+    selection = report["analysis"]["selection"]
+
+    assert report["status"] == "passed"
+    assert report["analysis"]["renderedCount"] == 2
+    assert selection["candidateCount"] == 3
+    assert selection["duplicateRate"] == 0.0
+    assert selection["totalWindowCount"] == 30
+    assert selection["densestWindowShare"] == round(2 / 3, 4)
+    assert any("not a quality score" in note for note in report["limitations"])
+

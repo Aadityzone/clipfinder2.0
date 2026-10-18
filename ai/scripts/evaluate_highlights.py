@@ -8,6 +8,10 @@ Input JSON format:
   ]
 }
 
+An optional per-case `media_duration` (seconds) enables label-free coverage and
+clustering diagnostics. Ground truth is required for precision/recall; the
+diagnostics block is descriptive and must not be reported as accuracy.
+
 Run from repository root:
   python -m ai.scripts.evaluate_highlights --input ai/benchmarks/example.json
 """
@@ -20,7 +24,20 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ai.services.evaluation import aggregate_evaluation_reports, evaluate_ranked_candidates
+from ai.services.evaluation import (
+    aggregate_evaluation_reports,
+    aggregate_selection_diagnostics,
+    evaluate_ranked_candidates,
+    selection_diagnostics,
+)
+
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) and number > 0 else None
 
 
 def _load_cases(path: Path) -> list[dict[str, Any]]:
@@ -41,6 +58,7 @@ def _load_cases(path: Path) -> list[dict[str, Any]]:
         valid.append({
             "id": str(case.get("id") or case.get("name") or f"case-{index + 1}"),
             "genre": str(case.get("genre") or "unknown").strip().lower() or "unknown",
+            "media_duration": _positive_float(case.get("media_duration", case.get("duration"))),
             "predictions": predictions,
             "ground_truth": labels,
         })
@@ -51,6 +69,7 @@ def evaluate_dataset(
     cases: list[dict[str, Any]], *, top_k: int = 10, iou_threshold: float = 0.5
 ) -> dict[str, Any]:
     reports = []
+    diagnostics = []
     genre_reports: dict[str, list[dict[str, Any]]] = {}
     for case in cases:
         metrics = evaluate_ranked_candidates(
@@ -58,8 +77,15 @@ def evaluate_dataset(
             top_k=top_k, iou_threshold=iou_threshold,
         )
         genre = str(case.get("genre") or "unknown").strip().lower() or "unknown"
-        case_report = {"id": case["id"], "genre": genre, **metrics}
+        # Structural diagnostics describe the whole ranked candidate set (not just
+        # top_k) and need no labels. They are reported alongside, never as quality.
+        structural = selection_diagnostics(
+            case["predictions"],
+            media_duration=_positive_float(case.get("media_duration")),
+        )
+        case_report = {"id": case["id"], "genre": genre, **metrics, "diagnostics": structural}
         reports.append(case_report)
+        diagnostics.append(structural)
         genre_reports.setdefault(genre, []).append(metrics)
     aggregate = aggregate_evaluation_reports(reports)
     by_genre = {
@@ -73,6 +99,12 @@ def evaluate_dataset(
         "requestedIoUThreshold": iou_threshold if math.isfinite(iou_threshold) else 0.5,
         "cases": reports,
         "aggregate": aggregate,
+        "structural": aggregate_selection_diagnostics(diagnostics),
+        "structuralNote": (
+            "Label-free shape metrics (duplication, coverage, clustering) measured over "
+            "predictions in the listed (delivered) order. They measure the selection's "
+            "structure, not whether the chosen moments are good highlights."
+        ),
         "byGenre": by_genre,
     }
 
