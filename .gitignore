@@ -22,6 +22,8 @@ ai/.env.*
 
 # local media and generated files
 storage/
+# real-media smoke output from ai/scripts/smoke_pipeline.py
+/artifacts/
 *.mp4
 *.mov
 *.mkv
