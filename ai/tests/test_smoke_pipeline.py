@@ -150,3 +150,76 @@ def test_smoke_invalid_source_metadata_is_reported_as_media_probe_failure(monkey
 
     assert failure.value.stage == "media_probe"
     assert failure.value.error_type == "RuntimeError"
+
+
+
+def test_smoke_candidate_validation_skips_invalid_top_candidates_without_using_slots():
+    from ai.scripts.smoke_pipeline import _valid_candidates
+
+    candidates = [
+        {"start": 90, "end": 110, "score": 100, "id": "outside-source"},
+        {"start": 8, "end": 12, "score": 95, "id": "clamped"},
+        {"start": 1, "end": 4, "score": 80, "id": "valid"},
+        {"start": 5, "end": 5, "score": 70, "id": "zero-duration"},
+        None,
+    ]
+
+    valid, invalid_count = _valid_candidates(candidates, duration=10)
+
+    assert [row["id"] for row in valid] == ["clamped", "valid"]
+    assert valid[0]["start"] == 8
+    assert valid[0]["end"] == 10
+    assert invalid_count == 3
+
+
+def test_smoke_candidate_validation_sorts_scores_and_handles_non_finite_values():
+    from ai.scripts.smoke_pipeline import _valid_candidates
+
+    candidates = [
+        {"start": 0, "end": 3, "score": 10, "id": "low"},
+        {"start": 4, "end": 7, "score": float("nan"), "id": "nonfinite-score"},
+        {"start": 7, "end": 9, "score": 50, "id": "high"},
+    ]
+
+    valid, invalid_count = _valid_candidates(candidates, duration=10)
+
+    assert [row["id"] for row in valid] == ["high", "low", "nonfinite-score"]
+    assert [row["score"] for row in valid] == [50, 10, 0]
+    assert invalid_count == 0
+
+
+def test_smoke_report_counts_invalid_candidates_and_renders_valid_candidate_after_them(monkeypatch, tmp_path):
+    import json
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    output = tmp_path / "out"
+    probes = iter([
+        {"duration": 10, "width": 640, "height": 360, "hasAudio": True},
+        {"duration": 2, "width": 1080, "height": 1920, "hasAudio": True},
+    ])
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: next(probes))
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: {
+        "language": "en", "text": "hello", "segments": [],
+    })
+    monkeypatch.setattr(smoke_pipeline, "analyze", lambda *_args: {"candidates": [
+        {"start": 50, "end": 60, "score": 100, "id": "invalid"},
+        {"start": 1, "end": 3, "score": 80, "id": "valid"},
+    ]})
+
+    def fake_render(_source, output_path, **_kwargs):
+        from pathlib import Path
+        Path(output_path).write_bytes(b"x" * 2048)
+
+    monkeypatch.setattr(smoke_pipeline, "render", fake_render)
+
+    report = smoke_pipeline.run_pipeline(source, output, top=1)
+
+    assert report["status"] == "passed"
+    assert report["analysis"]["candidateCount"] == 2
+    assert report["analysis"]["validCandidateCount"] == 1
+    assert report["analysis"]["invalidCandidateCount"] == 1
+    assert report["analysis"]["renderedCount"] == 1
+    assert report["clips"][0]["start"] == 1
+    assert json.loads((output / "report.json").read_text())["analysis"]["invalidCandidateCount"] == 1
