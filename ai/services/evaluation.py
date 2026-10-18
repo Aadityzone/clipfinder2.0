@@ -32,7 +32,7 @@ def evaluate_ranked_candidates(
     top_k: int = 10,
     iou_threshold: float = 0.5,
 ) -> dict[str, Any]:
-    """Greedily match top-ranked predictions to unique labels and report metrics."""
+    """Match top-ranked predictions to unique labels and report quality/coverage diagnostics."""
     try:
         k = max(1, int(top_k))
     except (TypeError, ValueError, OverflowError):
@@ -44,11 +44,8 @@ def evaluate_ranked_candidates(
     except (TypeError, ValueError, OverflowError):
         requested_threshold = 0.5
     threshold = min(1.0, max(0.0, requested_threshold)) if math.isfinite(requested_threshold) else 0.5
-    ranked = sorted(
-        (p for p in prediction_rows if _valid_interval(p)),
-        key=lambda item: _finite_score(item.get("score")),
-        reverse=True,
-    )[:k]
+    valid_predictions = [p for p in prediction_rows if _valid_interval(p)]
+    ranked = sorted(valid_predictions, key=lambda item: _finite_score(item.get("score")), reverse=True)[:k]
     labels = [g for g in label_rows if _valid_interval(g)]
 
     matched_labels: set[int] = set()
@@ -71,9 +68,17 @@ def evaluate_ranked_candidates(
     precision = matched_predictions / len(ranked) if ranked else 0.0
     recall = matched_predictions / len(labels) if labels else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    pair_count = len(ranked) * (len(ranked) - 1) // 2
+    duplicate_pairs = sum(
+        1
+        for i, left in enumerate(ranked)
+        for right in ranked[i + 1:]
+        if interval_iou(left, right) >= threshold and threshold > 0
+    )
+    centers = sorted((float(p["start"]) + float(p["end"])) / 2 for p in ranked)
     return {
         "predictionCount": len(prediction_rows),
-        "validPredictionCount": sum(1 for p in prediction_rows if _valid_interval(p)),
+        "validPredictionCount": len(valid_predictions),
         "groundTruthCount": len(labels),
         "evaluatedTopK": len(ranked),
         "iouThreshold": threshold,
@@ -82,29 +87,21 @@ def evaluate_ranked_candidates(
         "recallAtK": round(recall, 4),
         "f1AtK": round(f1, 4),
         "meanMatchedIoU": round(sum(ious) / len(ious), 4) if ious else 0.0,
+        "topKDuplicatePairRate": round(duplicate_pairs / pair_count, 4) if pair_count else 0.0,
+        "topKTemporalSpreadSeconds": round(centers[-1] - centers[0], 3) if len(centers) > 1 else 0.0,
     }
 
 
 def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Combine benchmark reports using count-weighted metrics and macro averages.
-
-    Malformed rows are ignored so one corrupt report cannot invalidate a benchmark.
-    """
+    """Combine benchmark reports using count-weighted metrics and macro averages."""
     reports = [report for report in reports if isinstance(report, dict)]
     if not reports:
         return {
-            "benchmarkCount": 0,
-            "predictionCount": 0,
-            "groundTruthCount": 0,
-            "matchedCount": 0,
-            "evaluatedTopK": 0,
-            "precisionAtK": 0.0,
-            "recallAtK": 0.0,
-            "f1AtK": 0.0,
-            "macroPrecisionAtK": 0.0,
-            "macroRecallAtK": 0.0,
-            "macroF1AtK": 0.0,
-            "meanMatchedIoU": 0.0,
+            "benchmarkCount": 0, "predictionCount": 0, "groundTruthCount": 0,
+            "matchedCount": 0, "evaluatedTopK": 0, "precisionAtK": 0.0,
+            "recallAtK": 0.0, "f1AtK": 0.0, "macroPrecisionAtK": 0.0,
+            "macroRecallAtK": 0.0, "macroF1AtK": 0.0, "meanMatchedIoU": 0.0,
+            "meanTopKDuplicatePairRate": 0.0, "meanTopKTemporalSpreadSeconds": 0.0,
         }
 
     prediction_count = sum(_nonnegative_int(report.get("predictionCount")) for report in reports)
@@ -123,20 +120,15 @@ def aggregate_evaluation_reports(reports: Sequence[dict[str, Any]]) -> dict[str,
     macro_f1 = sum(_bounded_metric(r.get("f1AtK")) for r in reports) / len(reports)
 
     return {
-        "benchmarkCount": len(reports),
-        "predictionCount": prediction_count,
-        "groundTruthCount": ground_truth_count,
-        "matchedCount": matched_count,
-        "evaluatedTopK": evaluated_count,
-        "precisionAtK": round(precision, 4),
-        "recallAtK": round(recall, 4),
-        "f1AtK": round(f1, 4),
+        "benchmarkCount": len(reports), "predictionCount": prediction_count,
+        "groundTruthCount": ground_truth_count, "matchedCount": matched_count,
+        "evaluatedTopK": evaluated_count, "precisionAtK": round(precision, 4),
+        "recallAtK": round(recall, 4), "f1AtK": round(f1, 4),
         "macroPrecisionAtK": round(macro_precision, 4),
-        "macroRecallAtK": round(macro_recall, 4),
-        "macroF1AtK": round(macro_f1, 4),
-        "meanMatchedIoU": round(matched_iou_weight / matched_count, 4)
-        if matched_count
-        else 0.0,
+        "macroRecallAtK": round(macro_recall, 4), "macroF1AtK": round(macro_f1, 4),
+        "meanMatchedIoU": round(matched_iou_weight / matched_count, 4) if matched_count else 0.0,
+        "meanTopKDuplicatePairRate": round(sum(_bounded_metric(r.get("topKDuplicatePairRate")) for r in reports) / len(reports), 4),
+        "meanTopKTemporalSpreadSeconds": round(sum(_nonnegative_float(r.get("topKTemporalSpreadSeconds")) for r in reports) / len(reports), 3),
     }
 
 
@@ -153,7 +145,7 @@ def _valid_interval(item: Any) -> bool:
 def _finite_score(value: Any) -> float:
     try:
         score = float(value)
-        if score == score and abs(score) != float("inf"):
+        if math.isfinite(score):
             return score
     except (TypeError, ValueError, OverflowError):
         pass
@@ -161,7 +153,6 @@ def _finite_score(value: Any) -> float:
 
 
 def _nonnegative_int(value: Any) -> int:
-    """Parse a non-negative count without allowing malformed data to crash aggregation."""
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -171,8 +162,15 @@ def _nonnegative_int(value: Any) -> int:
     return int(number)
 
 
+def _nonnegative_float(value: Any) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return number if math.isfinite(number) and number >= 0 else 0.0
+
+
 def _bounded_metric(value: Any) -> float:
-    """Return a finite metric in [0, 1], defaulting invalid values to zero."""
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
