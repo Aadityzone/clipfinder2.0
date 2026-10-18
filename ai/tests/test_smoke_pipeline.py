@@ -223,3 +223,58 @@ def test_smoke_report_counts_invalid_candidates_and_renders_valid_candidate_afte
     assert report["analysis"]["renderedCount"] == 1
     assert report["clips"][0]["start"] == 1
     assert json.loads((output / "report.json").read_text())["analysis"]["invalidCandidateCount"] == 1
+
+
+
+def test_smoke_invalid_transcriber_response_is_attributed_to_transcription(monkeypatch, tmp_path):
+    import pytest
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: {
+        "duration": 10, "width": 640, "height": 360,
+    })
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: None)
+
+    with pytest.raises(smoke_pipeline.SmokeStageError, match="Transcriber must return an object") as failure:
+        smoke_pipeline.run_pipeline(source, tmp_path / "out")
+
+    assert failure.value.stage == "transcription"
+    assert failure.value.error_type == "TypeError"
+
+
+def test_smoke_invalid_analyzer_response_is_attributed_to_analysis(monkeypatch, tmp_path):
+    import pytest
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: {
+        "duration": 10, "width": 640, "height": 360,
+    })
+    monkeypatch.setattr(smoke_pipeline, "transcribe", lambda *_args: {
+        "language": "en", "text": "hello", "segments": [],
+    })
+    monkeypatch.setattr(smoke_pipeline, "analyze", lambda *_args: {"items": []})
+
+    with pytest.raises(smoke_pipeline.SmokeStageError, match="candidates list") as failure:
+        smoke_pipeline.run_pipeline(source, tmp_path / "out")
+
+    assert failure.value.stage == "analysis"
+    assert failure.value.error_type == "TypeError"
+
+
+def test_smoke_invalid_media_probe_response_is_attributed_to_probe(monkeypatch, tmp_path):
+    import pytest
+    from ai.scripts import smoke_pipeline
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"input")
+    monkeypatch.setattr(smoke_pipeline, "ffprobe", lambda _path: None)
+
+    with pytest.raises(smoke_pipeline.SmokeStageError, match="Media probe must return an object") as failure:
+        smoke_pipeline.run_pipeline(source, tmp_path / "out")
+
+    assert failure.value.stage == "media_probe"
+    assert failure.value.error_type == "TypeError"
