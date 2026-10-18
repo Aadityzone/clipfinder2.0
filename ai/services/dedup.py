@@ -21,22 +21,40 @@ def _interval(candidate: dict) -> tuple[float, float] | None:
     return start, end
 
 
-def _iou(a: dict, b: dict) -> float:
+def _overlap(a: dict, b: dict) -> tuple[float, float]:
+    """Return intersection duration and IoU for two valid intervals."""
     first, second = _interval(a), _interval(b)
     if first is None or second is None:
-        return 0.0
-    left = max(first[0], second[0])
-    right = min(first[1], second[1])
-    intersection = max(0.0, right - left)
+        return 0.0, 0.0
+    intersection = max(0.0, min(first[1], second[1]) - max(first[0], second[0]))
     union = max(first[1], second[1]) - min(first[0], second[0])
-    return intersection / union if union > 0 else 0.0
+    return intersection, intersection / union if union > 0 else 0.0
+
+
+def _same_moment(a: dict, b: dict, threshold: float) -> bool:
+    """Detect duplicates by IoU or by coverage of the shorter candidate.
+
+    IoU alone misses duplicates when one detector proposes a broad setup/payoff
+    window and another proposes a tighter clip fully inside it. Coverage of the
+    shorter interval catches that case without merging candidates that merely
+    touch or have a small overlap.
+    """
+    intersection, iou = _overlap(a, b)
+    first, second = _interval(a), _interval(b)
+    if first is None or second is None or intersection <= 0:
+        return False
+    shorter_duration = min(first[1] - first[0], second[1] - second[0])
+    coverage = intersection / shorter_duration if shorter_duration > 0 else 0.0
+    return max(iou, coverage) >= threshold
 
 
 def deduplicate(candidates: list[dict], threshold: float = 0.55) -> list[dict]:
-    """Keep the highest-scoring valid candidate from each overlapping interval group.
+    """Keep the highest-scoring valid candidate from each overlapping moment group.
 
-    Invalid/non-finite intervals are dropped here as a final defensive boundary;
-    the candidate contract remains responsible for normalizing API output.
+    The threshold is compared with both interval IoU and the fraction of the
+    shorter interval covered by the overlap. Invalid/non-finite intervals are
+    dropped here as a final defensive boundary; the candidate contract remains
+    responsible for normalizing API output.
     """
     if not isinstance(candidates, (list, tuple)):
         return []
@@ -53,6 +71,6 @@ def deduplicate(candidates: list[dict], threshold: float = 0.55) -> list[dict]:
         valid.append(item)
     kept = []
     for candidate in sorted(valid, key=lambda item: item["score"], reverse=True):
-        if all(_iou(candidate, existing) < overlap_threshold for existing in kept):
+        if all(not _same_moment(candidate, existing, overlap_threshold) for existing in kept):
             kept.append(candidate)
     return kept
