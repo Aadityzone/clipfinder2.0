@@ -10,7 +10,7 @@ from .services.render import render
 from .highlights import candidates
 from .longform import stories, package
 from .services.media_intelligence import analyze_media
-from .services.dedup import deduplicate
+from .services.dedup import deduplicate, enforce_temporal_diversity
 from .services.llm import score_candidates, ranking_capabilities
 from .services.semantic import enrich_semantics
 from .services.transcript_rag import enrich_candidates_with_context
@@ -335,6 +335,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     # Revalidate after model/profile adjustments so the API never emits invalid scores.
     result = validate_candidates(result, media_duration)
     result = sorted(result, key=lambda x: float(x.get("score", 0)), reverse=True)
+    result = enforce_temporal_diversity(result)
     return {"candidates": result[:50]}
 
 @app.post("/v1/longform", response_model=LongFormResponse)
@@ -359,7 +360,9 @@ def longform(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
     items = validate_candidates(items, media_duration)
     items = deduplicate(items, threshold=0.55)
     items = validate_candidates(items, media_duration)
-    items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)[:6]
+    items = sorted(items, key=lambda item: float(item.get("score", 0)), reverse=True)
+    items = enforce_temporal_diversity(items, min_spacing_seconds=30.0, max_per_window=1, window_size_seconds=180.0)
+    items = items[:6]
     items = _ensure_candidate_titles(items)
     meta = package(b.segments, items)
     return {"stories": items, **meta}

@@ -56,3 +56,61 @@ def deduplicate(candidates: list[dict], threshold: float = 0.55) -> list[dict]:
         if all(_iou(candidate, existing) < overlap_threshold for existing in kept):
             kept.append(candidate)
     return kept
+
+
+def enforce_temporal_diversity(
+    candidates: list[dict],
+    min_spacing_seconds: float = 15.0,
+    max_per_window: int = 2,
+    window_size_seconds: float = 120.0,
+) -> list[dict]:
+    """Re-ranks candidates to prevent over-clustering in narrow time windows.
+
+    Candidates should be sorted descending by score.
+    Higher-scoring candidates that are temporally spaced and within window density limits
+    are prioritized at the front. Candidates that violate spacing or exceed the window
+    density quota are deferred to the tail (preserving their relative score order)
+    rather than discarded, ensuring that diversity is promoted while no candidates
+    are lost if the caller requests a large set.
+    """
+    if not isinstance(candidates, (list, tuple)):
+        return []
+    if not candidates:
+        return []
+
+    min_spacing = _finite(min_spacing_seconds)
+    min_spacing = max(0.0, min_spacing if min_spacing is not None else 15.0)
+    max_density = int(max_per_window) if max_per_window and max_per_window > 0 else 2
+    window_size = _finite(window_size_seconds)
+    window_size = max(10.0, window_size if window_size is not None else 120.0)
+
+    selected: list[dict] = []
+    deferred: list[dict] = []
+    window_counts: dict[int, int] = {}
+
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        interval = _interval(cand)
+        if interval is None:
+            deferred.append(cand)
+            continue
+
+        start, _ = interval
+        window_idx = int(start // window_size)
+
+        too_close = any(
+            abs(start - sel_interval[0]) < min_spacing
+            for sel in selected
+            if (sel_interval := _interval(sel)) is not None
+        )
+
+        window_full = window_counts.get(window_idx, 0) >= max_density
+
+        if not too_close and not window_full:
+            selected.append(cand)
+            window_counts[window_idx] = window_counts.get(window_idx, 0) + 1
+        else:
+            deferred.append(cand)
+
+    return selected + deferred
