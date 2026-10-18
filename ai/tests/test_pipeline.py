@@ -194,3 +194,43 @@ def test_dedup_clamps_invalid_threshold_to_safe_range():
         {"start": 1, "end": 9, "score": 80},
     ]
     assert len(deduplicate(items, threshold=float("nan"))) == 1
+
+
+def test_analyze_promotes_temporal_spread_across_the_source(monkeypatch):
+    """Regression: enforce_temporal_diversity must actually run during /v1/analyze.
+
+    Previously it was imported but never called, so the strongest candidates could
+    all sit in one narrow window of a long video.
+    """
+    from ai import main
+
+    rows = [
+        {"start": 0.0, "end": 12.0, "score": 90.0, "text": "First strong moment with a full sentence.", "features": {}, "category": "ai_detect"},
+        {"start": 20.0, "end": 32.0, "score": 89.0, "text": "Second strong moment with a full sentence.", "features": {}, "category": "ai_detect"},
+        {"start": 40.0, "end": 52.0, "score": 88.0, "text": "Third strong moment with a full sentence.", "features": {}, "category": "ai_detect"},
+        {"start": 600.0, "end": 612.0, "score": 50.0, "text": "Distant moment with a full sentence.", "features": {}, "category": "ai_detect"},
+    ]
+
+    monkeypatch.setattr(main, "auth", lambda _secret: None)
+    monkeypatch.setattr(main, "candidates", lambda *args, **kwargs: [dict(row) for row in rows])
+    monkeypatch.setattr(main, "optimize_candidates", lambda _segments, items: items)
+    monkeypatch.setattr(main, "multimodal_event_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(main, "enrich_semantics", lambda items, _instruction: items)
+    monkeypatch.setattr(main, "analyze_media", lambda _path: {})
+    monkeypatch.setattr(main, "deduplicate", lambda items: items)
+    monkeypatch.setattr(main, "enrich_candidates_with_context", lambda items, _segments: (items, {}))
+    monkeypatch.setattr(main, "score_candidates", lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(main, "diarize", lambda *args: {"available": False, "segments": []})
+    monkeypatch.setattr(main, "speaker_signals", lambda _segments: {"segments": []})
+    monkeypatch.setattr(main, "apply_genre_profile", lambda items, *args, **kwargs: items)
+    monkeypatch.setattr(main, "apply_creator_preferences", lambda items, *args: items)
+
+    result = main.analyze(main.AnalyzeRequest(
+        segments=[{"start": 0.0, "end": 12.0, "text": "First strong moment with a full sentence."}],
+        genre="auto",
+    ))
+
+    # The distant, lower-scoring candidate is promoted ahead of the third
+    # clustered candidate instead of everything being grouped by raw score.
+    assert [c["score"] for c in result["candidates"]] == [90.0, 89.0, 50.0, 88.0]
+    assert len(result["candidates"]) == 4
