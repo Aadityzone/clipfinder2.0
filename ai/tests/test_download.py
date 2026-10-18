@@ -143,3 +143,28 @@ def test_ai_metadata_route_does_not_call_ingestion_or_download(monkeypatch):
     result = ai_main.source_metadata(ai_main.SourceMetadataRequest(url="https://www.twitch.tv/videos/123"), None)
     assert result["duration"] == 7200
     assert result["title"] == "Source"
+
+
+def test_download_rejects_insufficient_disk_space(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(downloader.shutil, "disk_usage", lambda _p: SimpleNamespace(total=10**10, used=10**10 - 10**6, free=10**6))
+    with pytest.raises(RuntimeError, match="Insufficient disk space"):
+        downloader.download("https://www.twitch.tv/videos/123", str(tmp_path))
+
+
+def test_download_cleans_up_partial_files_on_failure(tmp_path, monkeypatch):
+    part_file = tmp_path / "source.mp4.part"
+    part_file.write_bytes(b"corrupted partial data")
+    temp_file = tmp_path / "source.temp"
+    temp_file.write_bytes(b"temp data")
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="Download aborted")
+
+    monkeypatch.setattr(downloader.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="Download aborted"):
+        downloader.download("https://www.twitch.tv/videos/123", str(tmp_path))
+
+    assert not part_file.exists()
+    assert not temp_file.exists()
+

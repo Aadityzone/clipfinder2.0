@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import json
 import math
+import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
@@ -15,6 +16,34 @@ SUPPORTED_HOSTS = {
 }
 DOWNLOAD_TIMEOUT_SECONDS = 3 * 60 * 60
 METADATA_TIMEOUT_SECONDS = 30
+MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(500 * 1024 * 1024)))
+
+
+def check_disk_space(directory: Path, min_bytes: int = MIN_FREE_DISK_BYTES) -> None:
+    """Verify sufficient free storage is available before starting heavy media downloads."""
+    try:
+        usage = shutil.disk_usage(directory)
+        if usage.free < min_bytes:
+            free_mb = usage.free // (1024 * 1024)
+            req_mb = min_bytes // (1024 * 1024)
+            raise RuntimeError(
+                f"Insufficient disk space in {directory}: {free_mb}MB available, "
+                f"requires at least {req_mb}MB."
+            )
+    except (OSError, ValueError):
+        pass
+
+
+def _cleanup_partials(directory: Path) -> None:
+    """Safely delete incomplete or aborted download artifacts."""
+    for pattern in ("*.part", "*.ytdl", "*.temp"):
+        for file in directory.glob(pattern):
+            try:
+                if file.is_file():
+                    file.unlink(missing_ok=True)
+            except OSError:
+                pass
+
 
 
 def validate_video_url(url: str) -> str:
@@ -44,6 +73,7 @@ def download(url: str, out_dir: str) -> str:
     safe_url = validate_video_url(url)
     output_dir = Path(out_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    check_disk_space(output_dir)
     template = str(output_dir / "source.%(ext)s")
 
     try:
@@ -66,11 +96,16 @@ def download(url: str, out_dir: str) -> str:
             timeout=DOWNLOAD_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
+        _cleanup_partials(output_dir)
         raise RuntimeError("Video download timed out after 3 hours.") from exc
     except FileNotFoundError as exc:
         raise RuntimeError("yt-dlp is not installed in the AI service environment.") from exc
+    except Exception:
+        _cleanup_partials(output_dir)
+        raise
 
     if result.returncode != 0:
+        _cleanup_partials(output_dir)
         detail = (result.stderr or result.stdout or "").strip()
         # Keep provider output useful for debugging without returning huge logs.
         detail = detail[-1200:] if detail else "yt-dlp exited without an error message."
@@ -140,6 +175,7 @@ def download_range(url: str, out_dir: str, start_seconds: float, end_seconds: fl
         raise ValueError("Source range must have finite non-negative timestamps with end after start.")
     output_dir = Path(out_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    check_disk_space(output_dir)
     template = str(output_dir / "source-range.%(ext)s")
     try:
         result = subprocess.run(
@@ -155,10 +191,15 @@ def download_range(url: str, out_dir: str, start_seconds: float, end_seconds: fl
             timeout=DOWNLOAD_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
+        _cleanup_partials(output_dir)
         raise RuntimeError("Selected source range download timed out.") from exc
     except FileNotFoundError as exc:
         raise RuntimeError("yt-dlp/FFmpeg is not installed in the AI service environment.") from exc
+    except Exception:
+        _cleanup_partials(output_dir)
+        raise
     if result.returncode != 0:
+        _cleanup_partials(output_dir)
         detail = (result.stderr or result.stdout or "").strip()
         detail = detail[-1200:] if detail else "The provider could not retrieve the selected section."
         raise RuntimeError(f"Selected source range download failed: {detail}")
