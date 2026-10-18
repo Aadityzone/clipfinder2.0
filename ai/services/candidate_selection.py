@@ -70,4 +70,5 @@ def select_temporally_diverse(
             if len(selected) >= max_items:
                 break
 
+    selected.sort(key=lambda item: (-item[3], item[0]))
     return [item[1] for item in selected]
