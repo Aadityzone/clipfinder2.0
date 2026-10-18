@@ -116,6 +116,8 @@ def run_pipeline(
         metadata = ffprobe(str(source))
     except Exception as exc:
         raise SmokeStageError("media_probe", exc) from exc
+    if not isinstance(metadata, dict):
+        raise SmokeStageError("media_probe", TypeError("Media probe must return an object."))
     duration = _number(metadata.get("duration"))
     if duration <= 0:
         raise SmokeStageError("media_probe", RuntimeError("Source video has no valid duration."))
@@ -126,6 +128,8 @@ def run_pipeline(
         transcript_result = transcribe(str(source), language)
     except Exception as exc:
         raise SmokeStageError("transcription", exc) from exc
+    if not isinstance(transcript_result, dict):
+        raise SmokeStageError("transcription", TypeError("Transcriber must return an object."))
     segments = transcript_result.get("segments") or []
     if not isinstance(segments, list):
         raise SmokeStageError("transcription", TypeError("Transcription segments must be a list."))
@@ -143,7 +147,11 @@ def run_pipeline(
         ))
     except Exception as exc:
         raise SmokeStageError("analysis", exc) from exc
-    candidates = analysis_result.get("candidates") or []
+    if not isinstance(analysis_result, dict):
+        raise SmokeStageError("analysis", TypeError("Analyzer must return an object."))
+    candidates = analysis_result.get("candidates")
+    if not isinstance(candidates, list):
+        raise SmokeStageError("analysis", TypeError("Analyzer response must contain a candidates list."))
     normalized_candidates, invalid_candidate_count = _valid_candidates(candidates, duration)
     render_candidates = normalized_candidates[:top]
     rendered = []
