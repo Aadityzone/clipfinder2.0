@@ -32,9 +32,14 @@ def _clean_text(text: str) -> str:
 
 
 def _contains_term(text: str, term: str) -> bool:
-    """Match OCR cues as whole words/phrases to avoid substring false positives."""
-    normalized = re.sub(r"\\s+", " ", text.lower()).strip()
-    phrase = re.sub(r"\\s+", " ", term.lower()).strip()
+    """Match OCR cues as whole words/phrases to avoid substring false positives.
+
+    OCR output regularly contains runs of spaces, tabs, and newlines. The text is
+    whitespace-normalized first so a multi-word on-screen phrase such as
+    ``GAME    OVER`` still matches the single-spaced ``game over`` term.
+    """
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\s+", " ", term.lower()).strip()
     return bool(
         phrase
         and re.search(
