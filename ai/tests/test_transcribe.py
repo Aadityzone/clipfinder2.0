@@ -18,6 +18,7 @@ def _clean_model_state(monkeypatch):
     monkeypatch.setattr(transcription, "_model", None)
     monkeypatch.setattr(transcription, "_load_thread", None)
     monkeypatch.setattr(transcription, "_load_result", {})
+    monkeypatch.setattr(transcription, "_model_device", "auto", raising=False)
 
 
 def test_model_initializes_only_once_under_concurrent_calls(monkeypatch):
@@ -315,6 +316,95 @@ def test_model_load_error_is_reported_and_a_later_retry_can_succeed(monkeypatch)
 
     monkeypatch.setattr(transcription, "WhisperModel", WorkingWhisperModel)
     assert isinstance(transcription.model(), WorkingWhisperModel)
+
+
+def test_missing_cuda_runtime_falls_back_to_cpu(monkeypatch):
+    """A machine with a partial CUDA install (torch present, cublas DLLs absent)
+    must keep transcription by falling back to CPU on an auto/GPU target."""
+    attempts = []
+
+    class GpuThenCpuWhisperModel:
+        def __init__(self, name, device=None, compute_type=None, local_files_only=None):
+            attempts.append(device)
+            if device == "cpu":
+                self.device = "cpu"
+
+    def fake_start_load(model_name, device, compute, local_only):
+        attempts.append(("start", device))
+        attempts_arr = attempts
+
+        def _worker():
+            if device != "cpu":
+                attempts_arr.append(("error", RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")))
+                transcription._load_result["error"] = RuntimeError(
+                    "Library cublas64_12.dll is not found or cannot be loaded"
+                )
+            else:
+                attempts_arr.append(("model", GpuThenCpuWhisperModel(model_name, device=device, compute_type=compute)))
+
+        transcription._load_thread = threading.Thread(daemon=True)
+        attempts_arr.append(("constructed",))
+        # Simulate the real _worker behavior for this test via a patched _load.
+        if device != "cpu":
+            transcription._load_result = {
+                "error": RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            }
+        else:
+            transcription._load_result = {
+                "model": GpuThenCpuWhisperModel(model_name, device=device, compute_type=compute)
+            }
+        transcription._load_thread = SimpleNamespace(is_alive=lambda: False, join=lambda _t: None)
+
+    monkeypatch.setattr(transcription, "_start_load", fake_start_load)
+    monkeypatch.setenv("WHISPER_DEVICE", "auto")
+    loaded = transcription.model()
+    devices = [row[1] for row in attempts if isinstance(row, tuple) and row[0] == "start"]
+    assert devices == ["auto", "cpu"]
+
+
+def test_explicit_cpu_failure_does_not_retry(monkeypatch):
+    seen = []
+
+    def fake_start_load(model_name, device, compute, local_only):
+        seen.append(device)
+        transcription._load_result = {"error": RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")}
+        transcription._load_thread = SimpleNamespace(is_alive=lambda: False, join=lambda _t: None)
+
+    monkeypatch.setattr(transcription, "_start_load", fake_start_load)
+    monkeypatch.setenv("WHISPER_DEVICE", "cpu")
+    with pytest.raises(RuntimeError, match="cublas64_12.dll"):
+        transcription.model()
+    assert seen == ["cpu"]
+
+
+def test_inference_failure_on_gpu_model_rebuilds_on_cpu(monkeypatch):
+    class FakeSegmentsUser:
+        def __init__(self, device):
+            self.device = device
+
+        def transcribe(self, _audio, **_kwargs):
+            if self.device != "cpu":
+                raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
+            return iter([SimpleNamespace(start=0.0, end=1.0, text="cpu retry", words=[])]), SimpleNamespace(
+                language="en", duration=1.0
+            )
+
+    gpu_model = FakeSegmentsUser("auto")
+
+    def fake_load_once(model_name, timeout, device, compute, local_only):
+        assert device == "cpu", "the rebuild must target CPU"
+        return FakeSegmentsUser(device)
+
+    monkeypatch.setattr(transcription, "_model", gpu_model, raising=False)
+    monkeypatch.setattr(transcription, "_model_device", "auto", raising=False)
+    monkeypatch.setattr(transcription, "_load_once", fake_load_once)
+    monkeypatch.setattr(
+        transcription, "decode_audio", lambda _path: np.zeros(16000, dtype=np.float32)
+    )
+
+    result = transcription.transcribe("source.mp4")
+
+    assert [s["text"] for s in result["segments"]] == ["cpu retry"]
 
 
 def test_model_load_passes_local_files_only_and_caches_one_instance(monkeypatch):

@@ -123,12 +123,65 @@ def _await_load(timeout: float, model_name: str) -> Any:
     raise RuntimeError(f"Whisper model '{model_name}' could not be loaded.")
 
 
+def _looks_like_cuda_failure(error: BaseException) -> bool:
+    """Recognize GPU library failures that a CPU fallback can actually fix."""
+    text = f"{type(error).__name__}: {error}".lower()
+    return any(marker in text for marker in ("cublas", "cudnn", "cuda", "nvidia", "gpu"))
+
+
+def _model_device_hint() -> str:
+    """Device the active model was constructed on (best effort; "auto" if unknown)."""
+    return globals().get("_model_device", "") or "auto"
+
+
+def _load_once(
+    model_name: str,
+    timeout: float,
+    device: str,
+    compute: str,
+    local_only: bool,
+) -> Any:
+    _start_load(model_name, device, compute, local_only)
+    try:
+        result = _await_load(timeout, model_name)
+    finally:
+        # The attempt is finished whether it succeeded or failed; a later
+        # call must not mistake the dead thread for a load still in flight.
+        global _load_thread
+        _load_thread = None
+    global _model_device
+    _model_device = device
+    return result
+
+
+def _reload_on_cpu(model_name: str | None = None) -> Any:
+    """Rebuild the process model on CPU after a GPU-only library failure."""
+    global _model
+    name = model_name or os.getenv("WHISPER_MODEL", "small")
+    timeout = _positive_seconds(
+        os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS"), DEFAULT_LOAD_TIMEOUT
+    )
+    _model = _load_once(
+        name,
+        timeout,
+        "cpu",
+        os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
+        _env_flag("WHISPER_LOCAL_FILES_ONLY", False),
+    )
+    return _model
+
+
 def model():
     """Load the configured Whisper model once, even under concurrent requests.
 
     The load is bounded in time. It is also the only place a model download may
     happen, and it runs on a daemon thread so a stalled download cannot block the
     model lock (and therefore the whole transcription route) indefinitely.
+
+    When the configured/auto device is a GPU stack whose CUDA libraries are
+    missing, the load falls back once to CPU so machines with a partial CUDA
+    install (torch bundles CUDA headers but not cublas/cudnn runtime DLLs) keep
+    their transcription capability instead of failing every request.
     """
     global _model
     if _model is None:
@@ -142,18 +195,17 @@ def model():
                 timeout = _positive_seconds(
                     os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS"), DEFAULT_LOAD_TIMEOUT
                 )
-                # Reuse a load that is already in flight instead of stacking another.
-                if _load_thread is None or not _load_thread.is_alive():
-                    _start_load(
-                        model_name,
-                        os.getenv("WHISPER_DEVICE", "auto"),
-                        os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
-                        _env_flag("WHISPER_LOCAL_FILES_ONLY", False),
-                    )
-                _model = _await_load(timeout, model_name)
+                compute = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+                local_only = _env_flag("WHISPER_LOCAL_FILES_ONLY", False)
+                requested_device = os.getenv("WHISPER_DEVICE", "auto")
+                try:
+                    _model = _load_once(model_name, timeout, requested_device, compute, local_only)
+                except RuntimeError as primary_error:
+                    if requested_device.strip().lower() in {"auto", "gpu", "cuda"} and _looks_like_cuda_failure(primary_error):
+                        _model = _load_once(model_name, timeout, "cpu", compute, local_only)
+                    else:
+                        raise
     return _model
-
-
 def transcription_capabilities() -> dict:
     available = WhisperModel is not None
     return {
@@ -184,12 +236,27 @@ def transcribe(path: str, language: str | None = None, timeout: float | None = N
     # `av.open`, which the installed PyAV no longer accepts, so every
     # transcription request failed with TypeError before any audio was read.
     audio = path if isinstance(path, np.ndarray) else decode_audio(path)
-    segments, info = model().transcribe(
-        audio,
-        language=language,
-        word_timestamps=True,
-        vad_filter=True,
-    )
+    try:
+        segments, info = model().transcribe(
+            audio,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+        )
+    except RuntimeError as inference_error:
+        # ctranslate2 can construct the model on CUDA when CUDA is visible but
+        # only part of the runtime (cublas/cudnn) is installed, and then fail on
+        # the first inference. One bounded rebuild on CPU preserves the request.
+        if _looks_like_cuda_failure(inference_error) and _model_device_hint() != "cpu":
+            _reload_on_cpu()
+            segments, info = model().transcribe(
+                audio,
+                language=language,
+                word_timestamps=True,
+                vad_filter=True,
+            )
+        else:
+            raise
     duration = _finite(getattr(info, "duration", None))
     # Timestamps cannot describe moments outside the decoded media; clamping
     # keeps malformed Whisper output from creating out-of-range candidates.
