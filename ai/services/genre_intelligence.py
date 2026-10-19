@@ -65,20 +65,28 @@ def normalize_genre(genre: str | None) -> str:
     return value if value in VALID_GENRES else "auto"
 
 
+def _contains_cue(text: str, cue: str) -> bool:
+    """Match complete words/phrases instead of accidental substrings (e.g. kill/skill)."""
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\s+", " ", cue.lower()).strip()
+    return bool(re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", normalized))
+
+
 def _count_cues(text: str, cues: tuple[str, ...]) -> int:
-    low = text.lower()
-    return sum(1 for cue in cues if cue in low)
+    return sum(1 for cue in cues if _contains_cue(text, cue))
 
 
 def infer_genre(transcript: str) -> tuple[str, dict[str, int]]:
-    """Infer a conservative genre from transcript cues; abstain on weak evidence."""
+    """Infer genre only when evidence is strong and the leading profile is unambiguous."""
     scores = {genre: _count_cues(transcript, cues) for genre, cues in GENRE_CUES.items()}
     if not scores:
         return "general", scores
-    genre = max(scores, key=scores.get)
-    if scores[genre] < 2:
+    highest = max(scores.values())
+    leaders = [genre for genre, score in scores.items() if score == highest]
+    # Avoid silently choosing whichever profile happens to appear first in the map.
+    if highest < 2 or len(leaders) != 1:
         return "general", scores
-    return genre, scores
+    return leaders[0], scores
 
 
 def apply_genre_profile(
@@ -111,10 +119,26 @@ def apply_genre_profile(
         if active == "gaming":
             bonus += min(2.0, len(action_labels) * 0.5)
             bonus += min(1.0, gameplay_ratio)
-        elif active in {"irl_stream", "podcast"}:
+            if any(label in {"combat", "victory", "failure"} for label in action_labels):
+                bonus += 1.5
+        elif active == "irl_stream":
             bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
+            bonus += min(1.0, float(features.get("audioEnergy") or 0))
+        elif active == "podcast":
+            bonus += min(1.5, float(features.get("faceHits") or 0) * 0.25)
+            speakers = features.get("speakers") or {}
+            bonus += min(2.0, float(speakers.get("turnCount") or 0) * 0.4)
         elif active in {"movies_tv", "anime"}:
-            bonus += min(1.5, visual_change * 1.5 + motion)
+            bonus += min(2.0, visual_change * 1.5 + motion)
+            bonus += min(1.0, float(features.get("sceneHits") or 0) * 0.2)
+        elif active == "tech":
+            bonus += min(1.5, float(features.get("sceneHits") or 0) * 0.25)
+            bonus += min(1.0, len(str(features.get("onScreenText") or "")) / 300)
+        elif active in {"knowledge", "facts"}:
+            story = features.get("story") or {}
+            bonus += min(2.0, float(story.get("completeness") or 0) * 2)
+            bonus += min(1.0, float(story.get("payoff") or 0))
+        bonus = min(12.0, bonus)
         candidate["score"] = round(min(100.0, float(candidate.get("score", 0)) + bonus), 2)
         features["genreProfile"] = {
             "requested": requested,

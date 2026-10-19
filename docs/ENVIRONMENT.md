@@ -28,6 +28,13 @@ Set `STORAGE_PROVIDER=local` for development. For S3/R2-compatible storage, set 
 ## Billing
 Stripe billing is implemented but remains inactive until `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` are configured. Checkout, customer portal, and subscription webhooks then become real Stripe-backed flows.
 
+## Analysis range policy
+`POST /api/sources/metadata` reads source details without creating a project or job. The range selector then requires an explicit confirmation before `POST /api/projects` creates the ingestion job. The server re-fetches metadata, checks the authenticated account's current subscription, and validates the selected boundaries before persisting them in the job payload.
+
+The current policy uses the existing plan states and does not change Stripe pricing: an active `pro` subscription may analyze up to three hours per project by default; Free may analyze up to one hour. Set `ANALYSIS_RANGE_PRO_MAX_HOURS` and `ANALYSIS_RANGE_FREE_MAX_HOURS` on the web server to configure those per-job maxima (valid values are 0 or 1–24 hours; invalid values use defaults). Both policies require at least one hour when the source is at least an hour long. A shorter source is the explicit exception: its full duration can be analyzed. Free may choose a one-hour or maximum-duration preset and adjust the start; Pro may choose custom durations. No monthly minute quota is currently defined or enforced in this repository; `Usage.minutesAnalyzed` remains metering only.
+
+For YouTube, Twitch, and Kick URLs the AI service requests a provider section with yt-dlp `--download-sections` and FFmpeg as the downloader. This fails the job without falling back to a full-source download. Section support and actual transferred bytes depend on the provider extractor and available media format; a provider-backed end-to-end transfer has not been verified in this environment. Google Drive currently exposes duration metadata through its authenticated API but downloads the full file; the worker seeks and processes only the selected interval from that local copy. Do not claim bandwidth savings for Drive. In both paths the job retains original source boundaries, and worker chunks translate between media-local and source timestamps.
+
 
 ## Runtime health checks
 

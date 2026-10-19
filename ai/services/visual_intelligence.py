@@ -8,10 +8,17 @@ required and unavailable models are reported instead of faking results.
 from __future__ import annotations
 
 import os
+import time
 from functools import lru_cache
 
-import cv2
 import numpy as np
+
+try:
+    import cv2
+    _CV2_IMPORT_ERROR = None
+except Exception as exc:  # A broken optional native wheel must not prevent API startup.
+    cv2 = None
+    _CV2_IMPORT_ERROR = exc
 
 
 def _frame_signature(frame: np.ndarray) -> np.ndarray:
@@ -41,6 +48,12 @@ def _motion(prev: np.ndarray | None, current: np.ndarray) -> float:
 def sample_visual_features(path: str, max_samples: int = 180) -> dict:
     if not os.path.isfile(path):
         return {"available": False, "samples": [], "reason": "media not found"}
+    if cv2 is None:
+        return {
+            "available": False,
+            "samples": [],
+            "reason": f"OpenCV is unavailable ({type(_CV2_IMPORT_ERROR).__name__})",
+        }
 
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -55,7 +68,10 @@ def sample_visual_features(path: str, max_samples: int = 180) -> dict:
     previous = None
     previous_sig = None
     t = 0.0
+    start_time = time.time()
     while t < duration and len(samples) < max_samples:
+        if time.time() - start_time > 60:
+            break
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
         ok, frame = cap.read()
         if not ok:
@@ -111,13 +127,16 @@ def _clip_model():
 
 def visual_capabilities() -> dict:
     return {
-        "local_features": True,
-        "semantic_backend": "clip" if _clip_model() is not None else None,
+        "local_features": cv2 is not None,
+        "local_features_reason": None if cv2 is not None else "OpenCV is unavailable",
+        "semantic_backend": "clip" if cv2 is not None and _clip_model() is not None else None,
         "clip_model": os.getenv("VISUAL_CLIP_MODEL", "openai/clip-vit-base-patch32"),
     }
 
 
 def semantic_frame_scores(path: str, query: str, max_samples: int = 60) -> list[dict]:
+    if cv2 is None:
+        return []
     backend = _clip_model()
     if backend is None or not query.strip():
         return []

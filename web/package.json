@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "worker": "tsx worker.ts",
+    "test": "tsx --test \"lib/**/*.test.ts\"",
     "test:storage": "tsx --test lib/storage.test.ts"
   },
   "dependencies": {
@@ -33,5 +34,9 @@
     "prisma": "^7.0.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "optionalDependencies": {
+    "@tailwindcss/oxide-linux-x64-gnu": "4.3.3",
+    "lightningcss-linux-x64-gnu": "1.32.0"
   }
 }

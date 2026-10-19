@@ -1,6 +1,10 @@
 name: CI
 on: [push, pull_request]
 
+concurrency:
+  group: clipfinder-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     env:
@@ -17,11 +21,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+          cache: npm
+      - run: npm install --include=optional
+      - run: npm ls lightningcss lightningcss-linux-x64-gnu @tailwindcss/oxide @tailwindcss/oxide-linux-x64-gnu
       - run: npm run prisma:generate
       - run: npx prisma validate --schema prisma/schema.prisma
       - run: npm run typecheck
-      - run: npm run test:storage
+      - run: npm run test:web
       - run: npm run lint
       - run: npm run build
 
@@ -32,7 +38,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai/requirements-ci.txt
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -r ai/requirements.txt
-      - run: python -m py_compile ai/main.py ai/schemas.py ai/transcribe.py ai/highlights.py ai/longform.py ai/services/render.py ai/services/media_intelligence.py ai/services/llm.py ai/services/dedup.py ai/services/captions.py
+      - run: python -m pip install -r ai/requirements-ci.txt
+      - run: python -m py_compile ai/main.py ai/schemas.py ai/transcribe.py ai/highlights.py ai/longform.py ai/services/render.py ai/services/media_intelligence.py ai/services/audio_intelligence.py ai/services/llm.py ai/services/dedup.py ai/services/captions.py
       - run: PYTHONPATH=. pytest -q

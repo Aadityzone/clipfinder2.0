@@ -8,7 +8,7 @@ def _number(value: Any) -> float:
     try:
         result = float(value)
         return result if math.isfinite(result) else 0.0
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0.0
 
 
@@ -40,6 +40,8 @@ def apply_creator_preferences(
     candidates: list[dict[str, Any]], preferences: dict[str, Any] | None
 ) -> list[dict[str, Any]]:
     """Apply a small, bounded creator-specific score adjustment to ranked candidates."""
+    if not isinstance(candidates, list):
+        return []
     if not isinstance(preferences, dict):
         return candidates
     allowed = {
@@ -55,7 +57,11 @@ def apply_creator_preferences(
         return candidates
 
     divisor = math.sqrt(len(weights))
-    for candidate in candidates:
+    adjusted = []
+    for raw_candidate in candidates:
+        if not isinstance(raw_candidate, dict):
+            continue
+        candidate = dict(raw_candidate)
         features = candidate.get("features")
         if not isinstance(features, dict):
             features = {}
@@ -64,9 +70,12 @@ def apply_creator_preferences(
         raw_adjustment = sum(weight * (vector[key] - 0.5) for key, weight in weights.items())
         adjustment = round(max(-5.0, min(5.0, 3.0 * raw_adjustment / divisor)), 2)
         candidate["score"] = round(max(0.0, min(100.0, _number(candidate.get("score")) + adjustment)), 2)
+        features = dict(features)
+        candidate["features"] = features
         features["creatorFeedback"] = {
             "applied": True,
             "scoreAdjustment": adjustment,
             "signalsUsed": len(weights),
         }
-    return candidates
+        adjusted.append(candidate)
+    return adjusted

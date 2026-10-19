@@ -727,6 +727,45 @@ From the repository root:
 python -m uvicorn ai.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
+### Run a real AI pipeline smoke test
+
+With the AI dependencies and FFmpeg installed, run a real source video through
+transcription, multimodal analysis, ranking, and MP4 rendering:
+
+```bash
+PYTHONPATH=. python ai/scripts/smoke_pipeline.py --source path/to/video.mp4 --genre gaming
+```
+
+Or use a supported public source URL:
+
+```bash
+PYTHONPATH=. python ai/scripts/smoke_pipeline.py --url "https://www.youtube.com/watch?v=..." --genre podcast --top 3
+```
+
+The command writes `transcript.json`, rendered `clip-XX.mp4` files, and
+`report.json` to `artifacts/ai-smoke` by default. It runs the actual models
+and media tools; it is not a mocked test. The first run may download Whisper
+model weights. A smoke-test pass proves that specific source completed the
+pipeline, not that the selected moments are universally high quality.
+
+To run the same test on GitHub without setting up a local environment, open
+**Actions → Real AI Video Smoke Test → Run workflow**, enter a public source URL
+you have permission to process, select its genre, and run it. The workflow
+uploads the transcript, JSON report, and rendered MP4s as a short-lived artifact.
+It uses the local Whisper model and does not require a cloud LLM API key.
+
+### Measure highlight quality
+
+Use human-labelled benchmark JSON files with `predictions`, `ground_truth`,
+and an optional `genre` field:
+
+```bash
+PYTHONPATH=. python ai/scripts/evaluate_highlights.py benchmarks/ --recursive --top-k 10 --iou 0.5
+```
+
+Use manually reviewed labels to interpret precision, recall, F1, and timestamp
+overlap; do not treat unlabelled model output as an accuracy benchmark.
+
 ### Worker
 
 ```bash
@@ -831,3 +870,34 @@ The product should become more powerful over time without sacrificing correctnes
 This repository is intentionally being built from a clean foundation.
 
 The source of truth is the code, database schema, tests, and documentation in this repository.
+
+## Evaluating highlight quality
+
+The AI service includes a repeatable offline benchmark runner for comparing ranked clip predictions with **human-labelled timestamp ranges**. It reports per-video and aggregate precision@K, recall@K, F1@K, and temporal intersection-over-union (IoU). This validates temporal matching and ranking coverage; it does not itself prove that a clip is entertaining or contextually correct.
+
+Create a JSON file with labelled examples:
+
+```json
+{
+  "cases": [
+    {
+      "id": "stream-example",
+      "predictions": [
+        { "start": 123.0, "end": 142.0, "score": 88.0 },
+        { "start": 420.0, "end": 438.0, "score": 71.0 }
+      ],
+      "ground_truth": [
+        { "start": 126.0, "end": 140.0 }
+      ]
+    }
+  ]
+}
+```
+
+Run the evaluator from the repository root:
+
+```powershell
+python -m ai.scripts.evaluate_highlights --input ai/benchmarks/your-labels.json --top-k 10 --iou-threshold 0.5 --output ai/benchmarks/report.json
+```
+
+Predictions should be ordered by model score (the evaluator sorts them). Keep a fixed labelled set when comparing ranking changes, include different content genres, and report per-video metrics alongside aggregate metrics. Do not treat an unlabelled sample or a synthetic test fixture as a measured quality result.

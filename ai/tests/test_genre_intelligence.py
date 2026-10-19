@@ -41,3 +41,70 @@ def test_auto_mode_records_detected_genre_and_abstains_on_weak_evidence():
     unknown = [{"text": "Hello there.", "score": 40, "features": {}}]
     result = apply_genre_profile(unknown, "Hello there.", "auto")
     assert result[0]["features"]["genreProfile"]["active"] == "general"
+
+
+
+def test_genre_cues_do_not_match_inside_unrelated_words():
+    # "skill" must not trigger the gaming cue "kill".
+    genre, scores = infer_genre("The developer explains a useful skill for beginners.")
+    assert scores["gaming"] == 0
+    assert genre == "general"
+
+
+def test_auto_genre_detection_abstains_when_top_profiles_tie():
+    genre, scores = infer_genre(
+        "The episode includes an interview and a game review with a final round."
+    )
+    # A tie should not be resolved by dictionary ordering.
+    top = max(scores.values())
+    leaders = [name for name, score in scores.items() if score == top]
+    if len(leaders) > 1:
+        assert genre == "general"
+
+
+
+def test_genre_profiles_use_available_modality_features():
+    podcast = [{
+        "text": "I disagree with your point, and here is why.",
+        "score": 50,
+        "features": {"speakers": {"turnCount": 4}, "faceHits": 2},
+    }]
+    apply_genre_profile(podcast, "This is an interview and conversation.", "podcast")
+    assert podcast[0]["score"] > 50
+
+    educational = [{
+        "text": "The process is explained step by step.",
+        "score": 50,
+        "features": {"story": {"completeness": 0.9, "payoff": 0.8}},
+    }]
+    apply_genre_profile(educational, "Here is how the process works because of this principle.", "knowledge")
+    assert educational[0]["score"] > 50
+
+    gaming = [{
+        "text": "The round ends with victory.",
+        "score": 50,
+        "features": {"onScreenActionLabels": ["victory"], "gameplayLikeRatio": 0.8},
+    }]
+    apply_genre_profile(gaming, "The final round ended in victory.", "gaming")
+    assert gaming[0]["score"] > 50
+
+def test_every_explicit_genre_profile_uses_its_own_transcript_evidence():
+    examples = {
+        "gaming": "The final round ended in a clutch victory.",
+        "irl_stream": "That prank reaction was wild, bro.",
+        "movies_tv": "The plot twist reveals the villain in the final scene.",
+        "anime": "The domain expansion transformation reaches its final form.",
+        "tech": "This GPU benchmark measures processor performance and latency.",
+        "knowledge": "Here is how the principle works because of the evidence.",
+        "facts": "Did you know scientists discovered a surprising record?",
+        "podcast": "I disagree with that point; let me explain my experience.",
+    }
+
+    for genre, text in examples.items():
+        candidate = [{"text": text, "score": 50, "features": {}}]
+        result = apply_genre_profile(candidate, text, genre)
+        profile = result[0]["features"]["genreProfile"]
+        assert profile["active"] == genre
+        assert profile["cueMatches"] > 0
+        assert result[0]["score"] > 50
+

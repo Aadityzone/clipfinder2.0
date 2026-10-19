@@ -9,8 +9,14 @@ from __future__ import annotations
 import os
 import re
 
-import cv2
 import numpy as np
+
+try:
+    import cv2
+    _CV2_IMPORT_ERROR = None
+except Exception as exc:  # OCR/action sampling is optional and native-wheel failures are common.
+    cv2 = None
+    _CV2_IMPORT_ERROR = exc
 
 ACTION_TERMS = {
     "combat": ("kill", "eliminated", "headshot", "attack", "damage", "enemy", "defeat"),
@@ -25,11 +31,28 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _contains_term(text: str, term: str) -> bool:
+    """Match OCR cues as whole words/phrases to avoid substring false positives.
+
+    OCR output regularly contains runs of spaces, tabs, and newlines. The text is
+    whitespace-normalized first so a multi-word on-screen phrase such as
+    ``GAME    OVER`` still matches the single-spaced ``game over`` term.
+    """
+    normalized = re.sub(r"\s+", " ", text.lower()).strip()
+    phrase = re.sub(r"\s+", " ", term.lower()).strip()
+    return bool(
+        phrase
+        and re.search(
+            r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])",
+            normalized,
+        )
+    )
+
+
 def _classify_ocr(text: str) -> list[str]:
-    low = text.lower()
     found = []
     for label, terms in ACTION_TERMS.items():
-        if any(term in low for term in terms):
+        if any(_contains_term(text, term) for term in terms):
             found.append(label)
     return found
 
@@ -37,6 +60,13 @@ def _classify_ocr(text: str) -> list[str]:
 def analyze_on_screen(path: str, max_samples: int = 90, ocr_enabled: bool = True) -> dict:
     if not os.path.isfile(path):
         return {"available": False, "samples": [], "reason": "media not found"}
+    if cv2 is None:
+        return {
+            "available": False,
+            "ocrAvailable": False,
+            "samples": [],
+            "reason": f"OpenCV is unavailable ({type(_CV2_IMPORT_ERROR).__name__})",
+        }
 
     try:
         import pytesseract

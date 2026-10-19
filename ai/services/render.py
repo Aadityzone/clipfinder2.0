@@ -1,13 +1,70 @@
+import math
 import os
 import subprocess
 import tempfile
 
 from .captions import write_ass
+from .media import ffprobe
 
 
 def _escape_filter_path(path: str) -> str:
     """Escape a filesystem path for FFmpeg's filter-argument parser."""
     return path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def _normalize_segments(
+    start: float,
+    end: float | None,
+    segments: list[dict] | None,
+) -> list[dict[str, float]]:
+    """Reject invalid edit ranges before invoking FFmpeg."""
+    source = segments or [{
+        "start": start,
+        "end": end if end is not None else float(start) + 0.01,
+    }]
+    normalized: list[dict[str, float]] = []
+    for index, segment in enumerate(source):
+        if not isinstance(segment, dict):
+            raise ValueError(f"Render segment {index + 1} must be an object.")
+        try:
+            segment_start = float(segment["start"])
+            segment_end = float(segment["end"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"Render segment {index + 1} needs numeric start and end.") from exc
+        if not math.isfinite(segment_start) or not math.isfinite(segment_end):
+            raise ValueError(f"Render segment {index + 1} timestamps must be finite.")
+        if segment_start < 0:
+            raise ValueError(f"Render segment {index + 1} cannot start before zero.")
+        if segment_end <= segment_start:
+            raise ValueError(f"Render segment {index + 1} end must be after its start.")
+        normalized.append({"start": segment_start, "end": segment_end})
+    return normalized
+
+
+def validate_render_output(output_path: str, expected_duration: float) -> dict:
+    """Reject partial, corrupt, or truncated outputs before callers persist them."""
+    if not os.path.isfile(output_path) or os.path.getsize(output_path) < 1024:
+        raise RuntimeError("Render output was not created or is too small to be a valid MP4.")
+
+    metadata = ffprobe(output_path)
+    try:
+        duration = float(metadata.get("duration") or 0)
+        width = int(metadata.get("width") or 0)
+        height = int(metadata.get("height") or 0)
+        expected = float(expected_duration)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError("Render output has invalid media metadata.") from exc
+    if not all(map(math.isfinite, (duration, expected))) or duration <= 0:
+        raise RuntimeError("Render output has no valid video duration.")
+    if width <= 0 or height <= 0:
+        raise RuntimeError("Render output has no valid video stream or dimensions.")
+    tolerance = max(1.0, expected * 0.05)
+    if expected <= 0 or abs(duration - expected) > tolerance:
+        raise RuntimeError(
+            f"Render output duration {duration:.3f}s does not match the expected "
+            f"{expected:.3f}s (tolerance {tolerance:.3f}s)."
+        )
+    return metadata
 
 
 def render(
@@ -22,8 +79,15 @@ def render(
     focus_x: float = 0.5,
 ):
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    segs = segments or [{"start": start, "end": end if end is not None else start + 0.01}]
-    focus_x = max(0.0, min(1.0, float(focus_x)))
+    segs = _normalize_segments(start, end, segments)
+    expected_duration = sum(segment["end"] - segment["start"] for segment in segs)
+    try:
+        focus_x = float(focus_x)
+    except (TypeError, ValueError, OverflowError):
+        focus_x = 0.5
+    if not math.isfinite(focus_x):
+        focus_x = 0.5
+    focus_x = max(0.0, min(1.0, focus_x))
     vf = {
         "9:16": f"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-1080)*{focus_x}:0",
         "1:1": f"scale=1080:1080:force_original_aspect_ratio=increase,crop=1080:1080:(iw-1080)*{focus_x}:0",
@@ -50,6 +114,7 @@ def render(
                     "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=1800,
             )
             return
 
@@ -66,6 +131,7 @@ def render(
                         "-movflags", "+faststart", part_path,
                     ],
                     check=True,
+                    timeout=1800,
                 )
                 parts.append(part_path)
 
@@ -80,10 +146,12 @@ def render(
                     "-c", "copy", "-movflags", "+faststart", base_output,
                 ],
                 check=True,
+                timeout=1800,
             )
 
     if not captions:
         render_base(output_path)
+        validate_render_output(output_path, expected_duration)
         return
 
     # Burn captions after assembling the complete edit so cue timestamps remain
@@ -101,4 +169,6 @@ def render(
                 "-c:a", "copy", "-movflags", "+faststart", output_path,
             ],
             check=True,
+            timeout=1800,
         )
+    validate_render_output(output_path, expected_duration)

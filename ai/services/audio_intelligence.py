@@ -1,51 +1,110 @@
+import math
 import os
-import re
 import subprocess
 
-def loudness_windows(path: str, window: float = 5.0) -> list[dict]:
-    """Approximate per-window loudness with bounded FFmpeg sampling.
+import numpy as np
 
-    This deliberately caps work for long videos. It is an intelligence feature,
-    not a render path, so coarse 5-second windows are preferable to spawning
-    hundreds of processes.
+
+def _window_stats(samples: np.ndarray) -> tuple[float | None, float | None, float]:
+    if samples.size == 0:
+        return None, None, 0.0
+    values = np.nan_to_num(samples.astype(np.float64, copy=False), nan=0.0, posinf=0.0, neginf=0.0)
+    rms = float(np.sqrt(np.mean(values * values)))
+    peak = float(np.max(np.abs(values)))
+    mean_db = max(-120.0, 20.0 * math.log10(max(rms, 1e-9)))
+    peak_db = max(-120.0, 20.0 * math.log10(max(peak, 1e-9)))
+    energy = max(0.0, min(1.0, (mean_db + 45.0) / 45.0))
+    return round(mean_db, 2), round(peak_db, 2), round(energy, 3)
+
+
+def loudness_windows(path: str, window: float = 5.0) -> list[dict]:
+    """Measure bounded audio windows with one FFmpeg decode process.
+
+    Audio is downmixed to mono 8 kHz float PCM and streamed window-by-window.
+    This avoids spawning a separate FFmpeg process for every interval, which
+    made long videos spend most of their analysis time repeatedly seeking.
     """
     if not os.path.isfile(path):
         return []
-    probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", path],
-        capture_output=True, text=True
-    )
+
     try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=20,
+        )
+        if probe.returncode != 0:
+            return []
         duration = max(0.0, float(probe.stdout.strip()))
-    except ValueError:
+    except (OSError, subprocess.SubprocessError, ValueError, OverflowError):
+        return []
+    if duration <= 0:
         return []
 
-    # Analyze at most 120 windows. Long videos are sampled rather than exhaustively scanned.
-    step = max(window, duration / 120.0)
-    rows = []
-    t = 0.0
-    while t < duration and len(rows) < 120:
-        length = min(step, duration - t)
-        p = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{t:.3f}",
-             "-t", f"{length:.3f}", "-i", path, "-af", "volumedetect", "-f", "null", "-"],
-            capture_output=True, text=True
-        )
-        m = re.search(r"mean_volume:\s*(-?[0-9.]+) dB", p.stderr)
-        peak = re.search(r"max_volume:\s*(-?[0-9.]+) dB", p.stderr)
-        mean = float(m.group(1)) if m else None
-        peak_db = float(peak.group(1)) if peak else mean
-        energy = max(0.0, min(1.0, (mean + 45.0) / 45.0)) if mean is not None else 0.0
-        rows.append({
-            "start": round(t, 3),
-            "end": round(t + length, 3),
-            "meanDb": mean,
-            "peakDb": peak_db,
-            "energy": round(energy, 3),
-        })
-        t += step
+    sample_rate = 8000
+    safe_window = max(0.25, float(window))
+    step = max(safe_window, duration / 120.0)
+    samples_per_window = max(1, int(round(step * sample_rate)))
+    chunk_bytes = samples_per_window * 4
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", path,
+        "-vn", "-ac", "1", "-ar", str(sample_rate), "-f", "f32le", "pipe:1",
+    ]
+    process = None
+    rows: list[dict] = []
+    elapsed = 0.0
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if process.stdout is None:
+            return []
+        while elapsed < duration and len(rows) < 120:
+            raw = process.stdout.read(chunk_bytes)
+            if not raw:
+                break
+            raw = raw[:len(raw) - (len(raw) % 4)]
+            if not raw:
+                break
+            samples = np.frombuffer(raw, dtype="<f4")
+            mean_db, peak_db, energy = _window_stats(samples)
+            actual_length = min(duration - elapsed, samples.size / sample_rate)
+            if actual_length <= 0:
+                break
+            rows.append({
+                "start": round(elapsed, 3),
+                "end": round(elapsed + actual_length, 3),
+                "meanDb": mean_db,
+                "peakDb": peak_db,
+                "energy": energy,
+            })
+            elapsed += actual_length
+        if process.stdout is not None and not getattr(process.stdout, "closed", False):
+            process.stdout.close()
+        try:
+            process.wait(timeout=5)
+        except TypeError:
+            process.wait()
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except (TypeError, subprocess.SubprocessError):
+                pass
+        if process.returncode and not rows:
+            return []
+    except (OSError, subprocess.SubprocessError):
+        return rows
+    finally:
+        if process is not None:
+            if process.stdout is not None and not getattr(process.stdout, "closed", False):
+                process.stdout.close()
+            if process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(timeout=2)
+                except (TypeError, subprocess.SubprocessError):
+                    pass
     return rows
+
 
 def summarize_window(audio: list[dict], start: float, end: float) -> dict:
     rows = [x for x in audio if float(x["end"]) > start and float(x["start"]) < end]
