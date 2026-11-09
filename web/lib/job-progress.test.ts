@@ -39,7 +39,7 @@ test("deriveProjectProcessingState correctly handles QUEUED job without worker",
   assert.equal(state.isTerminal, false);
 });
 
-test("deriveProjectProcessingState calculates real progress during DOWNLOADING", () => {
+test("deriveProjectProcessingState does not invent a download percentage", () => {
   const now = new Date();
   const state = deriveProjectProcessingState({
     id: "proj_downloading_1",
@@ -68,9 +68,11 @@ test("deriveProjectProcessingState calculates real progress during DOWNLOADING",
 
   assert.equal(state.status, "PROCESSING");
   assert.equal(state.technicalDetails.workerStatus, "active");
-  assert.ok(state.sourceProgress >= 40 && state.sourceProgress <= 60);
+  // The worker currently reports stage checkpoints, not measured bytes downloaded.
+  assert.equal(state.sourceProgress, 0);
   assert.equal(state.aiProgress, 0);
   assert.equal(state.clipProgress, 0);
+  assert.equal(state.overallProgress, null);
 });
 
 test("deriveProjectProcessingState detects STALLED worker when heartbeat is lost", () => {
@@ -169,7 +171,10 @@ test("deriveProjectProcessingState tracks AI transcription and candidate generat
 
   assert.equal(state.status, "PROCESSING");
   assert.equal(state.sourceProgress, 100); // Media is confirmed
-  assert.ok(state.aiProgress > 50); // In analyze phase
+  // The worker's 0.7 stage checkpoint is not a measured analysis fraction.
+  assert.equal(state.aiProgress, 0);
+  assert.equal(state.clipProgress, 0);
+  assert.equal(state.overallProgress, null);
   assert.equal(state.isTerminal, false);
 });
 
@@ -233,6 +238,36 @@ test("deriveProjectProcessingState confirms 100% completion across all three rin
   assert.equal(state.overallProgress, 100);
   assert.equal(state.candidatesFound, 2);
   assert.match(state.diagnosis, /processing complete/i);
+});
+
+test("deriveProjectProcessingState marks an empty completed analysis as READY", () => {
+  const now = new Date();
+  const state = deriveProjectProcessingState({
+    id: "proj_no_candidates",
+    createdAt: new Date(now.getTime() - 60000),
+    updatedAt: now,
+    source: { id: "src_empty", type: "YOUTUBE", media: [] },
+    jobs: [{
+      id: "job_analyze_empty",
+      type: "ANALYZE",
+      status: "READY",
+      progress: 1,
+      attempts: 1,
+      createdAt: new Date(now.getTime() - 30000),
+      finishedAt: now,
+      updatedAt: now,
+    }],
+    clips: [],
+    analyses: [],
+  });
+
+  assert.equal(state.status, "READY");
+  assert.equal(state.isTerminal, true);
+  assert.equal(state.overallProgress, 100);
+  assert.equal(state.sourceProgress, 0);
+  assert.equal(state.aiProgress, 100);
+  assert.equal(state.clipProgress, 100);
+  assert.match(state.diagnosis, /no clip candidates/i);
 });
 
 test("formatTimeOnly formats ISO string cleanly", () => {
