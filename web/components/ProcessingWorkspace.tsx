@@ -359,9 +359,9 @@ export default function ProcessingWorkspace({
         {/* Compact phase summaries mirror the three rings above. */}
         <div className="mt-6 grid gap-3 sm:grid-cols-3" aria-label="Processing phase progress">
           {([
-            { label: "Source preparation", value: state?.sourceProgress, tone: "bg-violet-400", text: "text-violet-200", match: /source|download|ingest|probe|media prep|extract/ },
-            { label: "AI intelligence", value: state?.aiProgress, tone: "bg-sky-400", text: "text-sky-200", match: /transcrib|analys|rank|whisper|audio|visual|candidate/ },
-            { label: "Clip generation", value: state?.clipProgress, tone: "bg-fuchsia-400", text: "text-fuchsia-200", match: /render|clip output|candidate/ },
+            { label: "Source preparation", value: state?.sourceProgress, tone: "bg-violet-400", text: "text-violet-200" },
+            { label: "AI intelligence", value: state?.aiProgress, tone: "bg-sky-400", text: "text-sky-200" },
+            { label: "Clip generation", value: state?.clipProgress, tone: "bg-fuchsia-400", text: "text-fuchsia-200" },
           ] as PhaseItem[]).map((phase: PhaseItem) => {
             const confirmed = Number.isFinite(phase.value) && Number(phase.value) >= 100;
             const stageText = `${state?.stage ?? ""} ${state?.stageLabel ?? ""}`.toLowerCase();
@@ -370,11 +370,11 @@ export default function ProcessingWorkspace({
             const phaseStatus = state?.status === "FAILED" ? "Failed" : state?.status === "STALLED" && inProgress ? "Paused · \u2014" : confirmed ? "Complete · 100%" : inProgress ? "Working · \u2014" : "Waiting · \u2014";
             return <div key={phase.label} className="rounded-2xl border border-white/[.07] bg-black/25 px-4 py-3" role="progressbar" aria-label={`${phase.label}: ${phaseStatus}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={confirmed ? 100 : undefined} aria-valuetext={phaseStatus}>
               <div className="flex items-center justify-between gap-2"><span className="text-[11px] font-medium text-zinc-300">{phase.label}</span><span className={`font-mono text-[10px] ${phase.text}`}>{phaseStatus}</span></div>
-              <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[.07]"><div className={`h-full rounded-full ${confirmed ? phase.tone : ""} ${inProgress ? `cf-progress-indeterminate ${phase.text}` : ""} transition-[width] duration-700`} style={{ width: confirmed ? "100%" : undefined }}/></div>
+              <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[.07]"><div className={`h-full rounded-full ${confirmed ? phase.tone : ""} ${inProgress ? `cf-progress-indeterminate ${phase.text}` : ""} transition-[width] duration-700`} style={{ width: confirmed ? "100%" : undefined }} /></div>
             </div>;
           })}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-zinc-500"><span>Source length <strong className="ml-1 font-mono text-zinc-300">{formatDuration(state?.sourceDurationS || 0)}</strong></span><span>Elapsed <strong className="ml-1 font-mono text-zinc-300">{formatElapsed(elapsedTime)}</strong></span><span>Candidates <strong className="ml-1 font-mono text-emerald-300">{state?.candidatesFound ?? 0}</strong></span><span>Clips ready <strong className="ml-1 font-mono text-zinc-300">{state?.completedClips ?? 0}</strong></span><span className="ml-auto">Worker <strong className="ml-1 font-mono text-violet-200">{state?.technicalDetails.workerStatus ?? "waiting"}</strong></span></div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-zinc-500"><span>Source length <strong className="ml-1 font-mono text-zinc-300">{formatDuration(state?.sourceDurationS || 0)}</strong></span><span>Elapsed <strong className="ml-1 font-mono text-zinc-300">{formatElapsed(elapsedTime)}</strong></span><span>Candidates <strong className="ml-1 font-mono text-emerald-300">{state?.candidatesFound ?? 0}</strong></span><span>Clips ready <strong className="ml-1 font-mono text-zinc-300">{state?.completedClips ?? 0}</strong></span><span className="ml-auto">Overall <strong className="ml-1 font-mono text-violet-200">{state?.overallProgress ?? 0}%</strong></span></div>
 
         {/* Live Processing Activity Panel (Requirement 2) */}
         <div className="mt-8 rounded-2xl border border-white/[.06] bg-black/40 p-5">

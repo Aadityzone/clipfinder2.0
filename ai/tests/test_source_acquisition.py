@@ -285,3 +285,4 @@ def test_ffprobe_detects_corrupted_empty_file(tmp_path):
 
     with pytest.raises(media.CorruptedMediaError):
         media.ffprobe(str(empty_file), strict=True)
+

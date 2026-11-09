@@ -1,11 +1,17 @@
 import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "../lib/auth";
 
 function Brand() {
-  return <Link href="/" className="inline-flex items-center gap-2.5 font-semibold tracking-tight" aria-label="Clip Finder home"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-[#39ff14] text-[#081008]"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M7 5.5v13l11-6.5L7 5.5Z" fill="currentColor"/><path d="M3.5 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span><span>clip<span className="text-[#39ff14]">finder</span><span className="ml-1 text-[10px] font-medium text-zinc-500">2.0</span></span></Link>;
+  return <Link href="/dashboard" className="inline-flex items-center gap-2.5 font-semibold tracking-tight" aria-label="Clip Finder workspace"><span className="grid h-8 w-8 place-items-center rounded-[10px] bg-[#39ff14] text-[#081008]"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M7 5.5v13l11-6.5L7 5.5Z" fill="currentColor"/><path d="M3.5 8v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span><span>clip<span className="text-[#39ff14]">finder</span><span className="ml-1 text-[10px] font-medium text-zinc-500">2.0</span></span></Link>;
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const user = await getCurrentUser();
+  if (user) {
+    redirect("/dashboard");
+  }
   return <main className="relative min-h-screen overflow-hidden bg-[#080a08] text-[#f5f7f5]">
     <div className="pointer-events-none absolute inset-x-0 top-0 h-[780px] cf-grid opacity-60" aria-hidden="true" />
     <div className="pointer-events-none absolute -top-72 left-[58%] h-[700px] w-[900px] -translate-x-1/2 rounded-full cf-glow" aria-hidden="true" />

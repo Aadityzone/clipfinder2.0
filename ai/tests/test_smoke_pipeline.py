@@ -50,6 +50,13 @@ def test_smoke_report_source_label_preserves_public_url_for_downloaded_temp_sour
     )
 
     assert report["source"] == "https://example.com/public-video"
+    assert report["media"]["sourceBytes"] == len(b"video")
+    assert report["performance"]["pipelineSeconds"] >= 0
+    assert report["performance"]["realTimeFactor"] > 0
+    assert report["performance"]["stageSeconds"]["ffprobeSeconds"] >= 0
+    assert report["performance"]["stageSeconds"]["transcriptionSeconds"] >= 0
+    assert report["performance"]["stageSeconds"]["analysisAndRankingSeconds"] >= 0
+    assert report["performance"]["stageSeconds"]["render1Seconds"] >= 0
     assert json.loads((output / "report.json").read_text())["source"] == "https://example.com/public-video"
 
 

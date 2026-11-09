@@ -65,3 +65,4 @@ test("storage path sanitization prevents directory traversal on media artifacts"
   assert.ok(validPath.includes("sources"));
   assert.ok(validPath.endsWith("video.mp4"));
 });
+

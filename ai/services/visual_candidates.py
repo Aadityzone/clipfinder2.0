@@ -64,9 +64,12 @@ def multimodal_event_candidates(
     audio_windows = media.get("audioWindows", [])
     scenes = scenes_block.get("sceneChanges", []) if isinstance(scenes_block, dict) else []
     screen_samples = on_screen_block.get("samples", []) if isinstance(on_screen_block, dict) else []
+    frame_block = media.get("frameAnalysis")
+    frame_samples = frame_block.get("frames", []) if isinstance(frame_block, dict) else []
     visual_samples = [row for row in (visual_samples or []) if isinstance(row, dict)]
     audio_windows = [row for row in (audio_windows or []) if isinstance(row, dict)]
     screen_samples = [row for row in (screen_samples or []) if isinstance(row, dict)]
+    frame_samples = [row for row in (frame_samples or []) if isinstance(row, dict)]
     scenes = scenes if isinstance(scenes, list) else []
     if not any((visual_samples, audio_windows, scenes, screen_samples)):
         return []
@@ -147,6 +150,10 @@ def multimodal_event_candidates(
             row for row in screen_samples
             if start <= _number(row.get("time"), -1) <= end
         ]
+        window_frames = [
+            row for row in frame_samples
+            if start <= _number(row.get("timestampS"), -1) <= end
+        ]
         vision_block = media.get("vision")
         face_rows = vision_block.get("faces", []) if isinstance(vision_block, dict) else []
         window_faces = [
@@ -173,6 +180,9 @@ def multimodal_event_candidates(
         evidence["onScreenText"] = " ".join(
             str(row.get("ocrText") or "") for row in window_screen
         )[:1200]
+        evidence["frameReferences"] = [
+            row["frameRef"] for row in window_frames if isinstance(row.get("frameRef"), dict)
+        ][:20]
         proposals.append({
             "start": round(start, 3),
             "end": round(end, 3),
