@@ -84,7 +84,7 @@ export interface ProjectProcessingState {
   diagnosisSubtext: string;
   stage: string;
   stageLabel: string;
-  overallProgress: number;
+  overallProgress: number | null;
   sourceProgress: number;
   aiProgress: number;
   clipProgress: number;
