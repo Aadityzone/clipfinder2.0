@@ -374,7 +374,7 @@ export default function ProcessingWorkspace({
             </div>;
           })}
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-zinc-500"><span>Source length <strong className="ml-1 font-mono text-zinc-300">{formatDuration(state?.sourceDurationS || 0)}</strong></span><span>Elapsed <strong className="ml-1 font-mono text-zinc-300">{formatElapsed(elapsedTime)}</strong></span><span>Candidates <strong className="ml-1 font-mono text-emerald-300">{state?.candidatesFound ?? 0}</strong></span><span>Clips ready <strong className="ml-1 font-mono text-zinc-300">{state?.completedClips ?? 0}</strong></span><span className="ml-auto">Overall <strong className="ml-1 font-mono text-violet-200">{state?.overallProgress ?? 0}%</strong></span></div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-zinc-500"><span>Source length <strong className="ml-1 font-mono text-zinc-300">{formatDuration(state?.sourceDurationS || 0)}</strong></span><span>Elapsed <strong className="ml-1 font-mono text-zinc-300">{formatElapsed(elapsedTime)}</strong></span><span>Candidates <strong className="ml-1 font-mono text-emerald-300">{state?.candidatesFound ?? 0}</strong></span><span>Clips ready <strong className="ml-1 font-mono text-zinc-300">{state?.completedClips ?? 0}</strong></span><span className="ml-auto">Overall <strong className="ml-1 font-mono text-violet-200">{state?.overallProgress == null ? "—" : `${state.overallProgress}%`}</strong></span></div>
 
         {/* Live Processing Activity Panel (Requirement 2) */}
         <div className="mt-8 rounded-2xl border border-white/[.06] bg-black/40 p-5">
