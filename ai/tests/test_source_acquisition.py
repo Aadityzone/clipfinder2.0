@@ -10,6 +10,15 @@ from ai.services import download as downloader
 from ai.services import media
 
 
+@pytest.fixture(autouse=True)
+def _public_dns_for_url_validation(monkeypatch):
+    """Keep URL-validation unit tests deterministic and independent of live DNS."""
+    def resolve_public(_host, *_args, **_kwargs):
+        return [(downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(downloader.socket, "getaddrinfo", resolve_public)
+
+
 # --- URL Validation Tests ---
 
 def test_validate_video_url_accepts_youtube_variants():
@@ -61,6 +70,36 @@ def test_validate_video_url_rejects_ssrf_and_private_ips():
     for url in dangerous_urls:
         with pytest.raises(ValueError):
             downloader.validate_video_url(url)
+
+
+def test_validate_video_url_rejects_hostnames_resolving_to_private_addresses(monkeypatch):
+    def resolve_private(_host, *_args, **_kwargs):
+        return [(downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", ("10.1.2.3", 0))]
+
+    monkeypatch.setattr(downloader.socket, "getaddrinfo", resolve_private)
+    with pytest.raises(ValueError, match="local or private"):
+        downloader.validate_video_url("https://media.example.com/clip.mp4")
+
+
+def test_validate_video_url_rejects_mixed_public_and_private_dns_answers(monkeypatch):
+    def resolve_mixed(_host, *_args, **_kwargs):
+        return [
+            (downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+            (downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", ("192.168.1.10", 0)),
+        ]
+
+    monkeypatch.setattr(downloader.socket, "getaddrinfo", resolve_mixed)
+    with pytest.raises(ValueError, match="local or private"):
+        downloader.validate_video_url("https://media.example.com/clip.mp4")
+
+
+def test_check_disk_space_fails_closed_when_capacity_cannot_be_read(tmp_path, monkeypatch):
+    def unavailable(_directory):
+        raise OSError("disk usage unavailable")
+
+    monkeypatch.setattr(downloader.shutil, "disk_usage", unavailable)
+    with pytest.raises(downloader.StorageLimitError, match="Could not verify available disk space"):
+        downloader.check_disk_space(tmp_path)
 
 
 def test_validate_video_url_rejects_credentials_and_nonstandard_ports():
