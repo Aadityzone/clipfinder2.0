@@ -101,67 +101,15 @@ export function deriveProjectProcessingState(project: {
 
   const heartbeatAgeMs = lastHeartbeat ? Math.max(0, now - lastHeartbeat.getTime()) : undefined;
 
-  // 1. Calculate Real Progress for Ring 1: SOURCE PROCESSING (0 - 100)
-  let sourceProgress = 0;
-  if (media?.id) {
-    // MediaAsset is persisted and durably verified
-    sourceProgress = 100;
-  } else if (ingestJob) {
-    if (ingestJob.status === "READY") {
-      sourceProgress = 100;
-    } else if (ingestJob.status === "DOWNLOADING") {
-      sourceProgress = Math.min(85, Math.max(25, Math.round(ingestJob.progress * 100)));
-    } else if (ingestJob.status === "INGESTING") {
-      sourceProgress = Math.min(40, Math.max(10, Math.round(ingestJob.progress * 100)));
-    } else if (ingestJob.status === "QUEUED") {
-      sourceProgress = 5;
-    } else if (ingestJob.status === "FAILED") {
-      sourceProgress = Math.round(ingestJob.progress * 100);
-    }
-  }
-
-  // 2. Calculate Real Progress for Ring 2: AI INTELLIGENCE (0 - 100)
-  let aiProgress = 0;
-  if (clips.length > 0 || (analyzeJob && analyzeJob.status === "READY")) {
-    // Candidate generation & scoring completed
-    aiProgress = 100;
-  } else if (analyzeJob && analyzeJob.status !== "QUEUED") {
-    // In analysis phase (audio/visual intelligence & ranking)
-    const subProgress = Math.round(analyzeJob.progress * 100);
-    aiProgress = Math.min(95, Math.max(50, 50 + Math.round(subProgress * 0.45)));
-  } else if (transcribeJob) {
-    if (transcribeJob.status === "READY") {
-      aiProgress = 50; // Transcription done, awaiting analyze
-    } else if (transcribeJob.status !== "QUEUED") {
-      const subProgress = Math.round(transcribeJob.progress * 100);
-      aiProgress = Math.min(48, Math.max(5, Math.round(subProgress * 0.48)));
-    }
-  }
-
-  // 3. Calculate Real Progress for Ring 3: CLIP GENERATION (0 - 100)
-  let clipProgress = 0;
+  // These rings report verified milestones, not estimated percentages. The worker's
+  // stage progress is not a measured byte/frame/model fraction, so intermediate
+  // percentages would imply precision the backend does not currently provide.
+  const sourceProgress = media?.id || ingestJob?.status === "READY" ? 100 : 0;
   const candidatesFound = clips.length;
   const completedClips = clips.filter((c) => c.status === "READY").length;
-
-  if (candidatesFound > 0) {
-    // Clips were successfully discovered and editor timeline prepared
-    if (renderJobs.length > 0) {
-      const readyRenders = renderJobs.filter((r) => r.status === "READY").length;
-      clipProgress = Math.min(100, Math.round((readyRenders / renderJobs.length) * 100));
-    } else {
-      // Candidates are fully prepared for review & editing
-      clipProgress = 100;
-    }
-  } else if (analyzeJob && analyzeJob.status === "ANALYZING") {
-    // Actively generating candidate cuts
-    clipProgress = Math.min(30, Math.max(0, Math.round(analyzeJob.progress * 30)));
-  }
-
-  // Composite overall progress (weighted: Source 30%, AI 45%, Clips 25%)
-  const overallProgress = Math.min(
-    100,
-    Math.round(sourceProgress * 0.3 + aiProgress * 0.45 + clipProgress * 0.25)
-  );
+  let aiProgress = candidatesFound > 0 || analyzeJob?.status === "READY" ? 100 : 0;
+  let clipProgress = analyzeJob?.status === "READY" || candidatesFound > 0 ? 100 : 0;
+  let overallProgress: number | null = null;
 
   // 4. Determine Worker Status & Queued / Stalled Diagnosis
   let status: WorkerJobStatus = "QUEUED";
@@ -177,7 +125,16 @@ export function deriveProjectProcessingState(project: {
     diagnosisSubtext = `${candidatesFound} candidate clips ready for preview and editing.`;
     workerStatus = "completed";
     isTerminal = true;
-    sourceProgress = 100;
+    aiProgress = 100;
+    clipProgress = 100;
+  } else if (activeJob?.status === "READY") {
+    // An analysis can finish successfully without finding a qualifying moment.
+    // Report completion honestly instead of treating READY as active processing.
+    status = "READY";
+    diagnosis = "Analysis completed; no clip candidates were found.";
+    diagnosisSubtext = "Try a different source range or analysis instruction.";
+    workerStatus = "completed";
+    isTerminal = true;
     aiProgress = 100;
     clipProgress = 100;
   } else if (activeJob) {
@@ -233,6 +190,8 @@ export function deriveProjectProcessingState(project: {
       }
     }
   }
+
+  if (status === "READY") overallProgress = 100;
 
   // 5. Build Stage Label
   let stage = activeJob?.status || "QUEUED";
