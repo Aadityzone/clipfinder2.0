@@ -78,3 +78,28 @@ Not production-ready on the evidence available. TypeScript passes, and an existi
 4. Add opt-in live PostgreSQL tests with an isolated test database and clear migration/setup requirements.
 5. Run rights-authorized source duration ladder and RTX 4050/CPU benchmark; preserve raw reports.
 6. Populate the evaluation CLI with held-out human labels before reporting genre metrics.
+
+## Follow-up review — 2026-11-09
+
+The following corrections were made on `audit/truthful-processing-progress` after reviewing the committed agent integration branch:
+
+- Processing rings now expose verified milestones only. The worker's stage checkpoint values are not measured download/transcription/render fractions, so they are no longer converted into invented percentages.
+- Overall progress is unknown (`null`) until the pipeline reaches a verified READY state; the UI displays an em dash rather than `0%` or a weighted estimate.
+- A completed analysis with zero qualifying candidates is now terminal READY with an explicit empty-result diagnosis, rather than falling through to the active-processing branch.
+- Clip edit persistence (edit row, clip boundaries/status, and creator event) is now one database transaction.
+- Render creation and its durable RENDER job are now one database transaction, preventing orphan queued render records.
+- Source URL validation now resolves hostnames and rejects any private/non-global DNS answer. This is a preflight defense only; production must still enforce outbound network restrictions to prevent DNS rebinding between validation and the downloader connection.
+- Disk-capacity inspection now fails closed when the filesystem cannot report free space.
+- Added regression tests for truthful progress, empty analysis completion, DNS-to-private and mixed DNS answers, and disk-capacity inspection failure.
+- Removed the tracked generated `web/tsconfig.tsbuildinfo` artifact from this audit branch.
+
+### Validation status after follow-up
+
+These changes were committed through the GitHub repository interface. This environment could not clone the repository or execute its local npm/Python test commands, and the audit branch has no CI run attached to its head. Therefore the new tests are **added but not yet executed**. Do not treat this follow-up as a passing build or production acceptance.
+
+### Remaining repository hygiene and integration blockers
+
+- The integration branch still contains the `.agent4-integration` and `.agent5-ai-worktree` gitlink entries. They are not readable as ordinary files through the repository contents API and should be removed if they are accidental worktree/submodule pointers; they must not be merged blindly.
+- The older open PR `#24` also contains a `.ai-pipeline-worktree` gitlink, a temporary patch file, pytest scratch artifacts, and tracked build output. It should be cleaned or superseded rather than merged as-is.
+- Open PRs `#24` and `#25` are marked non-mergeable and are based on stale commits. Rebase/reconcile against current `main` before considering either.
+- No current head CI evidence was available for the aggregate agent branch. The full browser, PostgreSQL concurrency/recovery, long-source acceptance, target-hardware performance, and human-labelled quality evaluation gaps remain open.
