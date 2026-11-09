@@ -71,7 +71,6 @@ export function deriveProjectProcessingState(project: {
   const ingestJob = jobs.find((j) => j.type === "INGEST");
   const transcribeJob = jobs.find((j) => j.type === "TRANSCRIBE");
   const analyzeJob = jobs.find((j) => j.type === "ANALYZE" || j.type === "LONGFORM_ANALYZE");
-  const renderJobs = jobs.filter((j) => j.type === "RENDER" || j.type === "LONGFORM_RENDER");
 
   // Determine current active or latest job
   const activeJob = jobs.find((j) =>
@@ -108,7 +107,7 @@ export function deriveProjectProcessingState(project: {
   const candidatesFound = clips.length;
   const completedClips = clips.filter((c) => c.status === "READY").length;
   let aiProgress = candidatesFound > 0 || analyzeJob?.status === "READY" ? 100 : 0;
-  let clipProgress = analyzeJob?.status === "READY" || candidatesFound > 0 ? 100 : 0;
+  const clipProgress = analyzeJob?.status === "READY" || candidatesFound > 0 ? 100 : 0;
   let overallProgress: number | null = null;
 
   // 4. Determine Worker Status & Queued / Stalled Diagnosis
