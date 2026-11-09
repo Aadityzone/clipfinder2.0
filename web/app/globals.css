@@ -51,6 +51,15 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 .cf-mascot-glow { background:radial-gradient(ellipse at center,rgba(57,255,20,.16),rgba(32,201,107,.08) 38%,transparent 72%); filter:blur(16px); }
 .cf-mascot-float { animation:cf-mascot-float 6.5s ease-in-out infinite; }
 @keyframes cf-mascot-float { 0%,100% { transform:translate3d(0,0,0) rotate(1deg); } 50% { transform:translate3d(0,-7px,0) rotate(-1.5deg); } }
+.cf-mascot-motion { display:block; }
+.cf-mascot-still { display:none!important; }
+[data-processing="false"] .cf-mascot-motion { display:none!important; }
+[data-processing="false"] .cf-mascot-still { display:block!important; }
+.cf-ring-active { transform-origin:230px 230px; animation:cf-ring-active-spin 5s linear infinite; }
+.cf-ring-error { stroke:#fb7185!important; stroke-dasharray:8 8!important; opacity:.9; }
+.cf-progress-indeterminate { width:34%; background:currentColor; animation:cf-progress-sweep 1.7s ease-in-out infinite alternate; }
+@keyframes cf-ring-active-spin { to { transform:rotate(360deg); } }
+@keyframes cf-progress-sweep { from { transform:translateX(-105%); } to { transform:translateX(305%); } }
 .cf-preview-scene { background-color:#121713; }
 .cf-preview-light { background:radial-gradient(ellipse at 70% 24%,rgba(32,201,107,.17),transparent 34%),radial-gradient(ellipse at 30% 74%,rgba(57,255,20,.08),transparent 45%),linear-gradient(145deg,#202820,#111612 58%,#1c241d); }
-@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } .cf-headline-line { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-duration:.01ms!important; } .cf-headline-line { opacity:1; transform:none; } .cf-mascot-motion { display:none!important; } .cf-mascot-still { display:block!important; } .cf-ring-active,.cf-progress-indeterminate { animation:none!important; } }

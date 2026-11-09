@@ -36,12 +36,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await mkdir(path.dirname(fullPath), { recursive: true });
     await pipeline(Readable.fromWeb(request.body as any), createWriteStream(fullPath));
     const fileInfo = await stat(fullPath);
-    const probe = await exec("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", fullPath], { timeout: 30_000 });
-    const probeData = JSON.parse(probe.stdout);
+    let probeData: any;
+    try {
+      const probe = await exec("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", fullPath], { timeout: 30_000 });
+      probeData = JSON.parse(probe.stdout);
+    } catch {
+      return Response.json({ error: "The uploaded media file is corrupted or cannot be decoded." }, { status: 422 });
+    }
     const streams = Array.isArray(probeData.streams) ? probeData.streams : [];
     const video = streams.find((stream: any) => stream.codec_type === "video");
     const audio = streams.find((stream: any) => stream.codec_type === "audio");
-    const duration = Number(probeData.format?.duration || 0);
+    const duration = Number(probeData.format?.duration || video?.duration || 0);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return Response.json({ error: "The uploaded media file has no valid duration." }, { status: 422 });
+    }
+    if (mimeType.startsWith("video/") && !video) {
+      return Response.json({ error: "The uploaded video file has no video stream." }, { status: 422 });
+    }
+    let fps: number | undefined;
+    if (video && typeof video.r_frame_rate === "string" && video.r_frame_rate.includes("/")) {
+      const [num, den] = video.r_frame_rate.split("/").map(Number);
+      if (den > 0 && Number.isFinite(num) && Number.isFinite(den)) fps = num / den;
+    }
     const subscription = await db.subscription.findUnique({ where: { userId: user.id }, select: { plan: true, status: true } });
     const entitlement = analysisEntitlement(subscription);
     const headerStart = request.headers.get("x-source-start-seconds");
@@ -62,7 +78,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const source = await tx.source.create({ data: { userId: user.id, type: "UPLOAD", name: originalName } });
       const asset = await tx.mediaAsset.create({ data: {
         sourceId: source.id, storageKey, mimeType, sizeBytes: BigInt(fileInfo.size), durationS: duration,
-        width: video?.width, height: video?.height, codec: video?.codec_name, hasAudio: Boolean(audio),
+        width: video?.width, height: video?.height, fps, codec: video?.codec_name, hasAudio: Boolean(audio),
       } });
       await tx.project.update({ where: { id: project.id }, data: { sourceId: source.id } });
       const job = await tx.job.create({ data: {

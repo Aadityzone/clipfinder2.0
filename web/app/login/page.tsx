@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 
 type ApiResponse = { error?: string; user?: { id: string } };
@@ -13,12 +13,18 @@ async function readApiResponse(response: Response): Promise<ApiResponse> {
 }
 
 function Brand() {
-  return <Link href="/" className="inline-flex items-center gap-2.5 font-semibold tracking-tight"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#39ff14] text-[#12180a]"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true"><path d="M7 5.5v13l11-6.5L7 5.5Z" fill="currentColor"/></svg></span><span>clip<span className="text-[#39ff14]">finder</span><span className="ml-1 text-[10px] text-zinc-500">2.0</span></span></Link>;
+  return <Link href="/dashboard" className="inline-flex items-center gap-2.5 font-semibold tracking-tight"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#39ff14] text-[#12180a]"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" aria-hidden="true"><path d="M7 5.5v13l11-6.5L7 5.5Z" fill="currentColor"/></svg></span><span>clip<span className="text-[#39ff14]">finder</span><span className="ml-1 text-[10px] text-zinc-500">2.0</span></span></Link>;
 }
 
 export default function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/projects").then(res => {
+      if (res.ok) window.location.assign("/dashboard");
+    }).catch(() => {});
+  }, []);
 
   async function go(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
