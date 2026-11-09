@@ -7,6 +7,7 @@ import json
 import math
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -100,18 +101,20 @@ def classify_acquisition_error(error_text: str) -> SourceAcquisitionError:
 
 
 def check_disk_space(directory: Path, min_bytes: int = MIN_FREE_DISK_BYTES) -> None:
-    """Verify sufficient free storage is available before starting heavy media downloads."""
+    """Verify free storage before downloads; fail closed if capacity cannot be checked."""
     try:
         usage = shutil.disk_usage(directory)
-        if usage.free < min_bytes:
-            free_mb = usage.free // (1024 * 1024)
-            req_mb = min_bytes // (1024 * 1024)
-            raise StorageLimitError(
-                f"Insufficient disk space in {directory}: {free_mb}MB available, "
-                f"requires at least {req_mb}MB."
-            )
-    except OSError:
-        pass
+    except OSError as exc:
+        raise StorageLimitError(
+            f"Could not verify available disk space for {directory}: {exc}"
+        ) from exc
+    if usage.free < min_bytes:
+        free_mb = usage.free // (1024 * 1024)
+        req_mb = min_bytes // (1024 * 1024)
+        raise StorageLimitError(
+            f"Insufficient disk space in {directory}: {free_mb}MB available, "
+            f"requires at least {req_mb}MB."
+        )
 
 
 def _cleanup_partials(directory: Path) -> None:
@@ -126,14 +129,26 @@ def _cleanup_partials(directory: Path) -> None:
 
 
 def is_safe_public_ip(host: str) -> bool:
-    """Return False if host resolves or parses to a loopback, private, or multicast IP."""
-    if host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
-        return False
+    """Reject literal or DNS-resolved addresses that are not globally routable.
+
+    This is a preflight defense. The AI service must also be protected by an
+    outbound network policy because a hostname could change its DNS answer
+    between this check and the downloader's own connection (DNS rebinding).
+    """
     try:
-        ip = ipaddress.ip_address(host)
-        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+        addresses = {ipaddress.ip_address(host)}
     except ValueError:
-        return True
+        try:
+            resolved = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except (OSError, socket.gaierror):
+            return False
+        addresses = set()
+        for result in resolved:
+            try:
+                addresses.add(ipaddress.ip_address(result[4][0].split("%", 1)[0]))
+            except (IndexError, ValueError, TypeError):
+                return False
+    return bool(addresses) and all(address.is_global for address in addresses)
 
 
 def validate_video_url(url: str) -> str:
