@@ -171,6 +171,14 @@ def _reload_on_cpu(model_name: str | None = None) -> Any:
     return _model
 
 
+def _finite(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def model():
     """Load the configured Whisper model once, even under concurrent requests.
 
@@ -274,8 +282,8 @@ def transcribe(path: str, language: str | None = None, timeout: float | None = N
             if start >= duration_limit:
                 continue
             end = min(end, duration_limit)
-            if end <= start:
-                continue
+        if end <= start:
+            continue
         words = []
         for word in getattr(segment, "words", None) or []:
             word_start = _finite(getattr(word, "start", None))

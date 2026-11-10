@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
 import { headStorage, putFile, storagePath, storageRoot } from "./storage";
 
 test("storagePath keeps valid relative keys inside the configured root", () => {
