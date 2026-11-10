@@ -7,9 +7,6 @@ concurrency:
 
 jobs:
   web:
-    permissions:
-      contents: write
-      actions: write
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/clipfinder
       AUTH_SECRET: ci-auth-secret-not-for-production
@@ -25,41 +22,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install --include=optional
-      - name: Apply non-breaking npm security fixes
-        continue-on-error: true
-        run: npm audit fix
-      - name: Upload npm audit-updated lockfile
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: npm-audit-remediated-lockfile
-          path: package-lock.json
-          if-no-files-found: error
-      - name: Commit patched lockfile and rerun CI on the updated PR head
-        if: (github.event_name == 'pull_request' && github.event.pull_request.number == 35) || (github.event_name == 'push' && github.ref_name == 'audit/truthful-processing-progress')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if ! git diff --quiet -- package-lock.json; then
-            BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
-            git fetch origin "$BRANCH"
-            git worktree add --detach "$RUNNER_TEMP/pr-head" FETCH_HEAD
-            cp package-lock.json "$RUNNER_TEMP/pr-head/package-lock.json"
-            if ! git -C "$RUNNER_TEMP/pr-head" diff --quiet -- package-lock.json; then
-              git -C "$RUNNER_TEMP/pr-head" config user.name 'github-actions[bot]'
-              git -C "$RUNNER_TEMP/pr-head" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git -C "$RUNNER_TEMP/pr-head" add package-lock.json
-              git -C "$RUNNER_TEMP/pr-head" commit -m 'chore(deps): commit compatible npm security updates'
-              git -C "$RUNNER_TEMP/pr-head" push origin HEAD:"$BRANCH"
-              gh workflow run ci.yml --ref "$BRANCH"
-            fi
-          fi
-      - name: Report npm dependency advisories
-        continue-on-error: true
-        run: |
-          npm audit --json > "$RUNNER_TEMP/npm-audit.json" || true
-          node -e 'const r=require(process.env.RUNNER_TEMP+"/npm-audit.json"); for (const [name,v] of Object.entries(r.vulnerabilities||{})) console.log(JSON.stringify({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,via:v.via.map(x=>typeof x==="string"?x:{name:x.name,title:x.title,url:x.url,range:x.range})})); console.log("TOTALS",JSON.stringify(r.metadata?.vulnerabilities||{}))'
+      - run: npm ci --include=optional
+      - name: Audit npm dependencies
+        run: npm audit
       - run: npm ls lightningcss lightningcss-linux-x64-gnu @tailwindcss/oxide @tailwindcss/oxide-linux-x64-gnu
       - run: npm run prisma:generate
       - run: npx prisma validate --schema prisma/schema.prisma
