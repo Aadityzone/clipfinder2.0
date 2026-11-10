@@ -42,11 +42,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! git diff --quiet -- package-lock.json; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add package-lock.json
-            git commit -m 'chore(deps): commit compatible npm security updates'
-            git push origin "HEAD:${GITHUB_HEAD_REF}"
+            git fetch origin "${GITHUB_HEAD_REF}"
+            git worktree add --detach "$RUNNER_TEMP/pr-head" FETCH_HEAD
+            cp package-lock.json "$RUNNER_TEMP/pr-head/package-lock.json"
+            git -C "$RUNNER_TEMP/pr-head" config user.name 'github-actions[bot]'
+            git -C "$RUNNER_TEMP/pr-head" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git -C "$RUNNER_TEMP/pr-head" add package-lock.json
+            git -C "$RUNNER_TEMP/pr-head" commit -m 'chore(deps): commit compatible npm security updates'
+            git -C "$RUNNER_TEMP/pr-head" push origin HEAD:"${GITHUB_HEAD_REF}"
             gh workflow run ci.yml --ref "${GITHUB_HEAD_REF}"
           fi
       - name: Report npm dependency advisories
