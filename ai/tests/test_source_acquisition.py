@@ -13,8 +13,10 @@ from ai.services import media
 @pytest.fixture(autouse=True)
 def _public_dns_for_url_validation(monkeypatch):
     """Keep URL-validation unit tests deterministic and independent of live DNS."""
-    def resolve_public(_host, *_args, **_kwargs):
-        return [(downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+    def resolve_public(host, *_args, **_kwargs):
+        # Keep localhost private while making public provider DNS deterministic.
+        address = "127.0.0.1" if host.rstrip(".").lower() == "localhost" else "93.184.216.34"
+        return [(downloader.socket.AF_INET, downloader.socket.SOCK_STREAM, 6, "", (address, 0))]
 
     monkeypatch.setattr(downloader.socket, "getaddrinfo", resolve_public)
 
