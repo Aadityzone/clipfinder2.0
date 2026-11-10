@@ -143,7 +143,7 @@ def test_bounded_analyze_shifts_candidates_back_to_source_timestamps(monkeypatch
     monkeypatch.setattr(main, "auth", lambda _secret: None)
     monkeypatch.setattr(main, "ffprobe", lambda path: {"duration": 120 if path == str(source) else 30})
     monkeypatch.setattr(main, "extract_analysis_range", lambda _source, _start, _end, _out: str(ranged))
-    monkeypatch.setattr(main, "analyze_media", lambda _path: {})
+    monkeypatch.setattr(main, "analyze_media", lambda _path, **_kwargs: {})
     monkeypatch.setattr(main, "candidates", lambda *_args, **_kwargs: [
         {"start": 1.0, "end": 5.0, "score": 80.0, "text": "A strong moment", "features": {}}
     ])
