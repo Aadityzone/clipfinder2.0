@@ -37,20 +37,23 @@ jobs:
           path: package-lock.json
           if-no-files-found: error
       - name: Commit patched lockfile and rerun CI on the updated PR head
-        if: github.event_name == 'pull_request' && github.event.pull_request.number == 35
+        if: (github.event_name == 'pull_request' && github.event.pull_request.number == 35) || (github.event_name == 'push' && github.ref_name == 'audit/truthful-processing-progress')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! git diff --quiet -- package-lock.json; then
-            git fetch origin "${GITHUB_HEAD_REF}"
+            BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+            git fetch origin "$BRANCH"
             git worktree add --detach "$RUNNER_TEMP/pr-head" FETCH_HEAD
             cp package-lock.json "$RUNNER_TEMP/pr-head/package-lock.json"
-            git -C "$RUNNER_TEMP/pr-head" config user.name 'github-actions[bot]'
-            git -C "$RUNNER_TEMP/pr-head" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git -C "$RUNNER_TEMP/pr-head" add package-lock.json
-            git -C "$RUNNER_TEMP/pr-head" commit -m 'chore(deps): commit compatible npm security updates'
-            git -C "$RUNNER_TEMP/pr-head" push origin HEAD:"${GITHUB_HEAD_REF}"
-            gh workflow run ci.yml --ref "${GITHUB_HEAD_REF}"
+            if ! git -C "$RUNNER_TEMP/pr-head" diff --quiet -- package-lock.json; then
+              git -C "$RUNNER_TEMP/pr-head" config user.name 'github-actions[bot]'
+              git -C "$RUNNER_TEMP/pr-head" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git -C "$RUNNER_TEMP/pr-head" add package-lock.json
+              git -C "$RUNNER_TEMP/pr-head" commit -m 'chore(deps): commit compatible npm security updates'
+              git -C "$RUNNER_TEMP/pr-head" push origin HEAD:"$BRANCH"
+              gh workflow run ci.yml --ref "$BRANCH"
+            fi
           fi
       - name: Report npm dependency advisories
         continue-on-error: true
