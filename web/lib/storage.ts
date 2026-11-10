@@ -7,7 +7,10 @@ import { Upload } from "@aws-sdk/lib-storage";
 
 export function storageRoot(){return path.resolve(process.env.MEDIA_STORAGE_ROOT||"../storage")}
 export function storagePath(key:string){
-  if(!key || key.includes("\0"))throw new Error("Storage key must be a non-empty relative path");
+  // Storage keys are portable object keys, not host filesystem paths. Reject
+  // Windows separators on every platform so traversal checks behave the same
+  // on Linux CI and Windows developer machines.
+  if(!key || key.includes("\0") || key.includes("\\"))throw new Error("Storage key must be a non-empty relative path");
   const root=storageRoot();
   const target=path.resolve(root,key);
   const relative=path.relative(root,target);
