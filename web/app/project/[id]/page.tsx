@@ -25,7 +25,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const ingestPayload = project.jobs.find(job => job.type === "INGEST")?.payload as { rangeLimitedDownload?: boolean; sourceRange?: { startSeconds?: number } } | undefined;
   const mediaOffsetSeconds = ingestPayload?.rangeLimitedDownload && project.source?.type !== "GOOGLE_DRIVE" ? Number(ingestPayload.sourceRange?.startSeconds ?? 0) : 0;
   const latest = project.jobs[0];
-  const processingState = deriveProjectProcessingState(project as any);
+  const processingState = deriveProjectProcessingState(project);
   const sourceLabel = project.source?.url ?? project.source?.name ?? "Uploaded source";
   return <WorkspaceFrame active="/dashboard" email={user.email ?? undefined} eyebrow="Project workspace" title={project.name} description={sourceLabel} action={<Link href={`/project/${project.id}/long-form`} className="cf-button-secondary !min-h-9 !rounded-[10px] !px-3 text-xs">Long-form workspace &rarr;</Link>}>
       <div className="mb-5 flex flex-wrap items-center gap-2">

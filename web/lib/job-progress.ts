@@ -16,11 +16,7 @@ import type {
 
 const STALLED_THRESHOLD_MS = 60_000; // 60 seconds without heartbeat marks active job as stalled
 
-/**
- * Derives comprehensive processing state and honest real-world progress across all 3 rings
- * from the database records of a Project.
- */
-export function deriveProjectProcessingState(project: {
+export interface ProjectProcessingInput {
   id: string;
   createdAt: Date;
   updatedAt: Date;
@@ -28,7 +24,7 @@ export function deriveProjectProcessingState(project: {
     id: string;
     type: string;
     url?: string | null;
-    media: Array<{
+    media?: Array<{
       id: string;
       durationS?: number | null;
       width?: number | null;
@@ -44,7 +40,7 @@ export function deriveProjectProcessingState(project: {
     progress: number;
     attempts: number;
     error?: string | null;
-    payload?: any;
+    payload?: unknown;
     startedAt?: Date | null;
     finishedAt?: Date | null;
     createdAt: Date;
@@ -59,9 +55,15 @@ export function deriveProjectProcessingState(project: {
   analyses?: Array<{
     id: string;
     createdAt: Date;
-    metadata?: any;
+    metadata?: unknown;
   }>;
-}): ProjectProcessingState {
+}
+
+/**
+ * Derives comprehensive processing state and honest real-world progress across all 3 rings
+ * from the database records of a Project.
+ */
+export function deriveProjectProcessingState(project: ProjectProcessingInput): ProjectProcessingState {
   const jobs = project.jobs || [];
   const clips = project.clips || [];
   const media = project.source?.media?.[0] || null;
@@ -84,9 +86,12 @@ export function deriveProjectProcessingState(project: {
   const elapsedMs = Math.max(0, now - startTime);
 
   // Extract structured progress state if stored in activeJob.payload
+  const rawPayload = activeJob?.payload && typeof activeJob.payload === "object"
+    ? (activeJob.payload as Record<string, unknown>)
+    : null;
   const payloadState: Partial<JobProgressState> =
-    activeJob?.payload?.progressState && typeof activeJob.payload.progressState === "object"
-      ? activeJob.payload.progressState
+    rawPayload?.progressState && typeof rawPayload.progressState === "object"
+      ? (rawPayload.progressState as Partial<JobProgressState>)
       : {};
 
   // Track worker heartbeat
@@ -352,79 +357,4 @@ export function deriveProjectProcessingState(project: {
     canRetry,
     activeJobId: activeJob?.id,
   };
-}
-
-/**
- * Persists an activity event and updated progress state inside Job.payload
- */
-export async function recordWorkerProgress(
-  jobId: string,
-  update: {
-    status?: WorkerJobStatus;
-    stage?: string;
-    stageLabel?: string;
-    sourceProgress?: number;
-    aiProgress?: number;
-    clipProgress?: number;
-    overallProgress?: number;
-    lastCheckpoint?: string;
-    activityMessage?: string;
-    candidatesFound?: number;
-    completedClips?: number;
-  },
-  client?: any
-) {
-  const dbClient = client || (await import("./db")).db;
-  const current = await dbClient.job.findUnique({
-    where: { id: jobId },
-    select: { payload: true, attempts: true, startedAt: true },
-  });
-  if (!current) return;
-
-  const payload = (current.payload && typeof current.payload === "object" ? current.payload : {}) as any;
-  const existingState = (payload.progressState || {}) as JobProgressState;
-  const nowIso = new Date().toISOString();
-
-  const activity: ActivityEvent[] = Array.isArray(existingState.activity) ? [...existingState.activity] : [];
-  if (update.activityMessage) {
-    activity.push({
-      timestamp: nowIso,
-      message: update.activityMessage,
-      stage: update.stage || existingState.stage,
-    });
-  }
-
-  const completedStages = new Set(existingState.completedStages || []);
-  if (update.lastCheckpoint) {
-    completedStages.add(update.lastCheckpoint);
-  }
-
-  const nextState: JobProgressState = {
-    status: update.status || existingState.status || "PROCESSING",
-    stage: update.stage || existingState.stage || "PROCESSING",
-    stageLabel: update.stageLabel || existingState.stageLabel || "Processing",
-    overallProgress: update.overallProgress ?? existingState.overallProgress ?? 0,
-    sourceProgress: update.sourceProgress ?? existingState.sourceProgress ?? 0,
-    aiProgress: update.aiProgress ?? existingState.aiProgress ?? 0,
-    clipProgress: update.clipProgress ?? existingState.clipProgress ?? 0,
-    heartbeatAt: nowIso,
-    startedAt: existingState.startedAt || current.startedAt?.toISOString() || nowIso,
-    updatedAt: nowIso,
-    retryCount: current.attempts,
-    completedStages: Array.from(completedStages),
-    activity,
-    lastCheckpoint: update.lastCheckpoint || existingState.lastCheckpoint,
-    candidatesFound: update.candidatesFound ?? existingState.candidatesFound,
-    completedClips: update.completedClips ?? existingState.completedClips,
-  };
-
-  await dbClient.job.update({
-    where: { id: jobId },
-    data: {
-      payload: {
-        ...payload,
-        progressState: nextState,
-      },
-    },
-  });
 }

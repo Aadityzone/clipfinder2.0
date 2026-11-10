@@ -10,7 +10,9 @@ export function storagePath(key:string){
   // Storage keys are portable object keys, not host filesystem paths. Reject
   // Windows separators on every platform so traversal checks behave the same
   // on Linux CI and Windows developer machines.
-  if(!key || key.includes("\0") || key.includes("\\"))throw new Error("Storage key must be a non-empty relative path");
+  if(!key || key.includes("\0"))throw new Error("Storage key must be a non-empty relative path");
+  if(path.isAbsolute(key) || key.startsWith("/"))throw new Error("Storage key must stay within MEDIA_STORAGE_ROOT");
+  if(key.includes("\\"))throw new Error("Storage key must be a non-empty relative path");
   const root=storageRoot();
   const target=path.resolve(root,key);
   const relative=path.relative(root,target);

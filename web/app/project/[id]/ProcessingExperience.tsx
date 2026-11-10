@@ -1,16 +1,16 @@
 "use client";
 
 import ProcessingWorkspace from "../../../components/ProcessingWorkspace";
-import type { ProjectProcessingState } from "../../../lib/job-progress";
+import type { ProjectProcessingState } from "../../../lib/processing-types";
 
-interface ProcessingExperienceProps {
+export interface ProcessingExperienceProps {
   projectId: string;
-  initialState: ProjectProcessingState | null;
+  initialState?: ProjectProcessingState | null;
 }
 
 export default function ProcessingExperience({
   projectId,
-  initialState,
+  initialState = null,
 }: ProcessingExperienceProps) {
   return (
     <section className="my-6" aria-label="AI Processing Workspace">

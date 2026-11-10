@@ -52,6 +52,19 @@ export default function ProcessingWorkspace({
   const [elapsedTime, setElapsedTime] = useState(initialState?.elapsedMs || 0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isPollingRef = useRef<boolean>(true);
+  const isMountedRef = useRef<boolean>(true);
+  const inFlightRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const stateRef = useRef(state);
+  const connectionRef = useRef(connection);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    connectionRef.current = connection;
+  }, [connection]);
 
   // Live timer tick for smooth elapsed time count
   useEffect(() => {
@@ -63,14 +76,28 @@ export default function ProcessingWorkspace({
   }, [state?.isTerminal]);
 
   // Fetch updated status from /api/projects/[id]/status
-  const fetchStatus = useCallback(async () => {
+  const fetchStatus = useCallback(async (): Promise<void> => {
+    if (inFlightRef.current || !isPollingRef.current || !isMountedRef.current) return;
+    inFlightRef.current = true;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const res = await fetch(`/api/projects/${projectId}/status`, {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
+        signal: controller.signal,
       });
-      if (!res.ok) throw new Error(res.status === 401 ? "Your session expired. Sign in again to keep monitoring this project." : `Status request returned ${res.status}.`);
+      if (!res.ok) {
+        throw new Error(
+          res.status === 401
+            ? "Your session expired. Sign in again to keep monitoring this project."
+            : `Status request returned ${res.status}.`
+        );
+      }
       const data: ProjectProcessingState = await res.json();
+      if (!isMountedRef.current) return;
+
       setState(data);
       setLoading(false);
       setElapsedTime(data.elapsedMs);
@@ -91,58 +118,71 @@ export default function ProcessingWorkspace({
       } else if (data.isTerminal) {
         isPollingRef.current = false;
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
       console.warn("[ProcessingWorkspace] Status poll error:", err);
       consecutiveErrors.current += 1;
       setConnection(consecutiveErrors.current >= 4 ? "stale" : "reconnecting");
       setConnectionError(err instanceof Error ? err.message : "Connection interrupted. Retrying automatically.");
+    } finally {
+      inFlightRef.current = false;
     }
   }, [projectId, onCompleted, router]);
 
   // Adaptive Polling Lifecycle
   useEffect(() => {
-    isPollingRef.current = true;
-    const initialPoll = window.setTimeout(() => { void fetchStatus(); }, 0);
+    isMountedRef.current = true;
+    isPollingRef.current = !initialState?.isTerminal;
 
-    const scheduleNextPoll = () => {
-      if (!isPollingRef.current) return;
+    const scheduleNextPoll = (initialDelay?: number) => {
+      if (!isPollingRef.current || !isMountedRef.current) return;
 
-      // Determine interval based on state and tab visibility
-      let delay = 2000;
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        delay = 12000; // Throttle when tab is backgrounded
-      } else if (state?.status === "QUEUED") {
-        delay = 3500;
-      } else if (state?.status === "STALLED") {
-        delay = 4000;
-      } else if (state?.status === "PROCESSING") {
-        delay = 1800;
+      let delay = initialDelay !== undefined ? initialDelay : 2000;
+      if (initialDelay === undefined) {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+          delay = 12000;
+        } else if (stateRef.current?.status === "QUEUED") {
+          delay = 3500;
+        } else if (stateRef.current?.status === "STALLED") {
+          delay = 4000;
+        } else if (stateRef.current?.status === "PROCESSING") {
+          delay = 1800;
+        }
+        if (connectionRef.current !== "connected") {
+          delay = Math.min(2500 * (2 ** Math.min(consecutiveErrors.current, 4)), 30000);
+        }
       }
-      if (connection !== "connected") delay = Math.min(2500 * (2 ** Math.min(consecutiveErrors.current, 4)), 30000);
 
       timerRef.current = setTimeout(async () => {
-        if (!isPollingRef.current) return;
+        if (!isPollingRef.current || !isMountedRef.current) return;
         await fetchStatus();
         scheduleNextPoll();
       }, delay);
     };
 
-    scheduleNextPoll();
+    // If no initialState was provided, schedule the initial poll immediately via timer (0ms)
+    scheduleNextPoll(initialState ? undefined : 0);
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && isPollingRef.current) {
-        fetchStatus();
+      if (document.visibilityState === "visible" && isPollingRef.current && isMountedRef.current) {
+        if (!inFlightRef.current) {
+          void fetchStatus();
+        }
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      isMountedRef.current = false;
       isPollingRef.current = false;
-      clearTimeout(initialPoll);
       if (timerRef.current) clearTimeout(timerRef.current);
+      abortControllerRef.current?.abort();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchStatus, state?.status, connection]);
+  }, [fetchStatus, initialState]);
 
   // Action: Retry job
   const handleRetry = async () => {
@@ -358,11 +398,11 @@ export default function ProcessingWorkspace({
 
         {/* Compact phase summaries mirror the three rings above. */}
         <div className="mt-6 grid gap-3 sm:grid-cols-3" aria-label="Processing phase progress">
-          {([
-            { label: "Source preparation", value: state?.sourceProgress, tone: "bg-violet-400", text: "text-violet-200" },
-            { label: "AI intelligence", value: state?.aiProgress, tone: "bg-sky-400", text: "text-sky-200" },
-            { label: "Clip generation", value: state?.clipProgress, tone: "bg-fuchsia-400", text: "text-fuchsia-200" },
-          ] as PhaseItem[]).map((phase: PhaseItem) => {
+          {[
+            { label: "Source preparation", value: state?.sourceProgress, tone: "bg-violet-400", text: "text-violet-200", match: /(source|download|ingest|probe|media prep|extract)/ },
+            { label: "AI intelligence", value: state?.aiProgress, tone: "bg-sky-400", text: "text-sky-200", match: /(transcrib|analys|rank|whisper|audio|visual|candidate)/ },
+            { label: "Clip generation", value: state?.clipProgress, tone: "bg-fuchsia-400", text: "text-fuchsia-200", match: /(render|clip output)/ },
+          ].map((phase: PhaseItem) => {
             const confirmed = Number.isFinite(phase.value) && Number(phase.value) >= 100;
             const stageText = `${state?.stage ?? ""} ${state?.stageLabel ?? ""}`.toLowerCase();
             const atStage = phase.match.test(stageText);
