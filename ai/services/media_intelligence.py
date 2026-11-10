@@ -6,6 +6,7 @@ import subprocess
 from .audio_intelligence import loudness_windows
 from .visual_intelligence import sample_visual_features
 from .action_intelligence import analyze_on_screen
+from .video_context import build_visual_context, extract_sampled_frames
 
 import time
 
@@ -129,7 +130,7 @@ def _isolate(producer, fallback):
         return fallback
 
 
-def analyze_media(path: str) -> dict:
+def analyze_media(path: str, transcript_segments: list[dict] | None = None) -> dict:
     """Collect multimodal evidence, isolating every optional signal.
 
     Audio, scene detection, faces, visual sampling and OCR may each be unavailable
@@ -139,11 +140,32 @@ def analyze_media(path: str) -> dict:
     as negative evidence for that modality.
     """
     audio, windows = _isolate(lambda: audio_features(path), ({}, []))
+    scenes = _isolate(lambda: scene_features(path), {})
+    vision = _isolate(lambda: face_features(path), {})
+    on_screen = _isolate(lambda: analyze_on_screen(path), {})
+    frames = _isolate(lambda: extract_sampled_frames(path), {})
+    visual = {
+        "available": bool(frames.get("available") and frames.get("visualSamples")),
+        "durationS": frames.get("durationS"),
+        "sampleCount": len(frames.get("visualSamples", [])),
+        "samples": frames.get("visualSamples", []),
+    }
+    if not frames.get("available"):
+        fallback_visual = _isolate(lambda: sample_visual_features(path), None)
+        if fallback_visual is not None:
+            visual = fallback_visual
+        else:
+            visual["reason"] = frames.get("reason", "FFmpeg frame sampling unavailable")
     return {
         "audio": audio,
         "audioWindows": windows,
-        "scenes": _isolate(lambda: scene_features(path), {}),
-        "vision": _isolate(lambda: face_features(path), {}),
-        "visual": _isolate(lambda: sample_visual_features(path), {}),
-        "onScreen": _isolate(lambda: analyze_on_screen(path), {}),
+        "scenes": scenes,
+        "vision": vision,
+        "visual": visual,
+        "onScreen": on_screen,
+        "frameAnalysis": frames,
+        "visualContext": _isolate(lambda: build_visual_context(
+            frames, scenes=scenes, visual_samples=visual, on_screen=on_screen,
+            vision=vision, audio_windows=windows, transcript_segments=transcript_segments,
+        ), {"available": False, "scenes": []}),
     }

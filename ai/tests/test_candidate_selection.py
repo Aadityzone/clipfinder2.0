@@ -344,7 +344,7 @@ def test_bounded_analyze_keeps_the_diversified_order(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "auth", lambda _secret: None)
     monkeypatch.setattr(main, "ffprobe", lambda path: {"duration": 120 if path == str(source) else 30})
     monkeypatch.setattr(main, "extract_analysis_range", lambda _s, _a, _b, _out: str(ranged))
-    monkeypatch.setattr(main, "analyze_media", lambda _path: {})
+    monkeypatch.setattr(main, "analyze_media", lambda _path, **_kwargs: {})
     monkeypatch.setattr(main, "candidates", lambda *_a, **_k: [dict(row) for row in rows])
     monkeypatch.setattr(main, "optimize_candidates", lambda _segments, items: items)
     monkeypatch.setattr(main, "enrich_semantics", lambda items, _instruction: items)

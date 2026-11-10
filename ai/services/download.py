@@ -2,41 +2,124 @@
 
 from __future__ import annotations
 
-import os
+import ipaddress
 import json
 import math
+import os
 import shutil
+import socket
 import subprocess
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Supported video hostnames
 SUPPORTED_HOSTS = {
     "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be",
-    "twitch.tv", "www.twitch.tv", "m.twitch.tv", "kick.com", "www.kick.com",
+    "twitch.tv", "www.twitch.tv", "m.twitch.tv", "clips.twitch.tv",
+    "kick.com", "www.kick.com",
 }
+
+# Direct public video extensions supported via generic acquisition
+DIRECT_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".mkv", ".m4v"}
+
 DOWNLOAD_TIMEOUT_SECONDS = 3 * 60 * 60
 METADATA_TIMEOUT_SECONDS = 30
 MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(500 * 1024 * 1024)))
+MAX_DOWNLOAD_SIZE_BYTES = int(os.getenv("MAX_DOWNLOAD_SIZE_BYTES", str(15 * 1024 * 1024 * 1024)))  # 15GB default
+MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "2"))
+
+
+# --- Error Hierarchy ---
+
+class SourceAcquisitionError(RuntimeError):
+    """Base error for all media acquisition failures."""
+    pass
+
+
+class UnsupportedSourceError(ValueError):
+    """Raised when URL provider or scheme is not supported."""
+    pass
+
+
+class PrivateOrDeletedVideoError(SourceAcquisitionError):
+    """Raised when source video is private, removed, deleted, or 404."""
+    pass
+
+
+class RestrictedVideoError(SourceAcquisitionError):
+    """Raised when source video has DRM, age gate, login wall, or geo-block."""
+    pass
+
+
+class TransientNetworkError(SourceAcquisitionError):
+    """Raised on recoverable network drops, timeouts, or transient 5xx faults."""
+    pass
+
+
+class StorageLimitError(SourceAcquisitionError):
+    """Raised when available disk storage is below safety threshold."""
+    pass
+
+
+class CorruptedDownloadError(SourceAcquisitionError):
+    """Raised when downloaded file is incomplete, empty, or unparseable."""
+    pass
+
+
+def classify_acquisition_error(error_text: str) -> SourceAcquisitionError:
+    """Classify provider error output into typed acquisition exceptions."""
+    text = (error_text or "").lower()
+
+    # Private, deleted, or not found
+    if any(p in text for p in [
+        "private video", "this video is private", "removed by the uploader",
+        "video unavailable", "not available", "does not exist", "deleted",
+        "404", "not found", "vod unavailable", "no video formats found"
+    ]):
+        return PrivateOrDeletedVideoError(f"Source video is unavailable or deleted: {error_text}")
+
+    # Restricted, age-gated, geo-blocked, login required, DRM
+    if any(p in text for p in [
+        "sign in to confirm", "confirm your age", "age-restricted", "members-only",
+        "login required", "geo-restricted", "not available in your country",
+        "drm protected", "copyright claim", "requires payment"
+    ]):
+        return RestrictedVideoError(f"Source video is restricted or access-controlled: {error_text}")
+
+    # Transient network errors
+    if any(p in text for p in [
+        "timed out", "timeout", "connection reset", "connection refused",
+        "temporary failure in name resolution", "name or service not known",
+        "network is unreachable", "http error 5", "502 bad gateway",
+        "503 service unavailable", "504 gateway timeout", "unable to download webpage"
+    ]):
+        return TransientNetworkError(f"Transient network error during acquisition: {error_text}")
+
+    # Fallback to generic acquisition error preserving provider detail
+    return SourceAcquisitionError(f"Video acquisition failed: {error_text}")
 
 
 def check_disk_space(directory: Path, min_bytes: int = MIN_FREE_DISK_BYTES) -> None:
-    """Verify sufficient free storage is available before starting heavy media downloads."""
+    """Verify free storage before downloads; fail closed if capacity cannot be checked."""
     try:
         usage = shutil.disk_usage(directory)
-        if usage.free < min_bytes:
-            free_mb = usage.free // (1024 * 1024)
-            req_mb = min_bytes // (1024 * 1024)
-            raise RuntimeError(
-                f"Insufficient disk space in {directory}: {free_mb}MB available, "
-                f"requires at least {req_mb}MB."
-            )
-    except (OSError, ValueError):
-        pass
+    except OSError as exc:
+        raise StorageLimitError(
+            f"Could not verify available disk space for {directory}: {exc}"
+        ) from exc
+    if usage.free < min_bytes:
+        free_mb = usage.free // (1024 * 1024)
+        req_mb = min_bytes // (1024 * 1024)
+        raise StorageLimitError(
+            f"Insufficient disk space in {directory}: {free_mb}MB available, "
+            f"requires at least {req_mb}MB."
+        )
 
 
 def _cleanup_partials(directory: Path) -> None:
     """Safely delete incomplete or aborted download artifacts."""
-    for pattern in ("*.part", "*.ytdl", "*.temp"):
+    for pattern in ("*.part", "*.ytdl", "*.temp", "source-range.*.part"):
         for file in directory.glob(pattern):
             try:
                 if file.is_file():
@@ -45,9 +128,31 @@ def _cleanup_partials(directory: Path) -> None:
                 pass
 
 
+def is_safe_public_ip(host: str) -> bool:
+    """Reject literal or DNS-resolved addresses that are not globally routable.
+
+    This is a preflight defense. The AI service must also be protected by an
+    outbound network policy because a hostname could change its DNS answer
+    between this check and the downloader's own connection (DNS rebinding).
+    """
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            resolved = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except (OSError, socket.gaierror):
+            return False
+        addresses = set()
+        for result in resolved:
+            try:
+                addresses.add(ipaddress.ip_address(result[4][0].split("%", 1)[0]))
+            except (IndexError, ValueError, TypeError):
+                return False
+    return bool(addresses) and all(address.is_global for address in addresses)
+
 
 def validate_video_url(url: str) -> str:
-    """Return a normalized HTTP(S) URL from a supported video provider."""
+    """Return a normalized HTTP(S) URL from a supported video provider or direct media URL."""
     value = url.strip()
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().rstrip(".")
@@ -55,60 +160,81 @@ def validate_video_url(url: str) -> str:
         raise ValueError("Enter a valid HTTP or HTTPS video URL.")
     if parsed.username or parsed.password:
         raise ValueError("Video URLs must not contain embedded credentials.")
+    if not is_safe_public_ip(host):
+        raise ValueError("Video URLs pointing to local or private networks are forbidden.")
     try:
         port = parsed.port
     except ValueError as exc:
         raise ValueError("Video URL has an invalid port.") from exc
     if port not in {None, 80, 443}:
         raise ValueError("Video URLs must use the provider's standard web port.")
-    if host not in SUPPORTED_HOSTS:
-        raise ValueError(
-            "Unsupported video provider. Supported providers are YouTube, Twitch, and Kick."
-        )
-    return value
+
+    # Check supported providers
+    if host in SUPPORTED_HOSTS:
+        return value
+
+    # Check direct media URL with standard video extension
+    path_lower = parsed.path.lower()
+    if any(path_lower.endswith(ext) for ext in DIRECT_VIDEO_EXTENSIONS):
+        return value
+
+    raise ValueError(
+        "Unsupported video provider. Supported providers are YouTube, Twitch, Kick, and direct public media files."
+    )
 
 
 def download(url: str, out_dir: str) -> str:
-    """Download a single video, rejecting playlist expansion and partial outputs."""
+    """Download a single video, rejecting playlist expansion and partial outputs, with bounded retries."""
     safe_url = validate_video_url(url)
     output_dir = Path(out_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     check_disk_space(output_dir)
     template = str(output_dir / "source.%(ext)s")
 
-    try:
-        result = subprocess.run(
-            [
-                "yt-dlp",
-                "--no-playlist",
-                "--no-warnings",
-                "--format",
-                "bv*+ba/b",
-                "--merge-output-format",
-                "mp4",
-                "--output",
-                template,
-                safe_url,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=DOWNLOAD_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        _cleanup_partials(output_dir)
-        raise RuntimeError("Video download timed out after 3 hours.") from exc
-    except FileNotFoundError as exc:
-        raise RuntimeError("yt-dlp is not installed in the AI service environment.") from exc
-    except Exception:
-        _cleanup_partials(output_dir)
-        raise
+    cmd = [
+        "yt-dlp",
+        "--no-playlist",
+        "--no-warnings",
+        "--continue",
+        "--max-filesize", str(MAX_DOWNLOAD_SIZE_BYTES),
+        "--format", "bv*+ba/b",
+        "--merge-output-format", "mp4",
+        "--output", template,
+        safe_url,
+    ]
 
-    if result.returncode != 0:
+    last_error: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            _cleanup_partials(output_dir)
+            raise RuntimeError("Video download timed out after 3 hours.") from exc
+        except FileNotFoundError as exc:
+            raise RuntimeError("yt-dlp is not installed in the AI service environment.") from exc
+        except Exception as exc:
+            _cleanup_partials(output_dir)
+            raise exc
+
+        if result.returncode == 0:
+            break
+
         _cleanup_partials(output_dir)
         detail = (result.stderr or result.stdout or "").strip()
-        # Keep provider output useful for debugging without returning huge logs.
         detail = detail[-1200:] if detail else "yt-dlp exited without an error message."
+        classified = classify_acquisition_error(detail)
+        last_error = classified
+
+        # Only retry transient network errors
+        if isinstance(classified, TransientNetworkError) and attempt < MAX_RETRIES:
+            time.sleep(1.0 * (attempt + 1))
+            continue
         raise RuntimeError(f"Video download failed: {detail}")
 
     candidates = sorted(
@@ -141,26 +267,38 @@ def get_video_metadata(url: str) -> dict:
         raise RuntimeError("Video metadata lookup timed out.") from exc
     except FileNotFoundError as exc:
         raise RuntimeError("yt-dlp is not installed in the AI service environment.") from exc
+
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         detail = detail[-1200:] if detail else "The source is private, deleted, or unavailable."
+        classified = classify_acquisition_error(detail)
+        if isinstance(classified, (PrivateOrDeletedVideoError, RestrictedVideoError)):
+            raise classified
         raise RuntimeError(f"Video metadata lookup failed: {detail}")
+
     try:
         raw = json.loads(result.stdout)
     except (TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("The provider returned invalid video metadata.") from exc
+
     try:
         duration = float(raw.get("duration"))
     except (TypeError, ValueError, OverflowError) as exc:
         raise RuntimeError("The provider did not return a usable video duration.") from exc
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError("The provider did not return a usable video duration.")
+
     return {
         "title": str(raw.get("title") or "")[:300] or None,
         "duration": duration,
         "thumbnail": str(raw.get("thumbnail") or "")[:2048] or None,
         "platform": str(raw.get("extractor_key") or raw.get("extractor") or "Video")[:80],
         "sourceId": str(raw.get("id") or "")[:200] or None,
+        "width": raw.get("width"),
+        "height": raw.get("height"),
+        "fps": raw.get("fps"),
+        "vcodec": raw.get("vcodec"),
+        "acodec": raw.get("acodec"),
     }
 
 
@@ -173,36 +311,52 @@ def download_range(url: str, out_dir: str, start_seconds: float, end_seconds: fl
         raise ValueError("Source range timestamps must be numeric.") from exc
     if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
         raise ValueError("Source range must have finite non-negative timestamps with end after start.")
+
     output_dir = Path(out_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     check_disk_space(output_dir)
     template = str(output_dir / "source-range.%(ext)s")
-    try:
-        result = subprocess.run(
-            [
-                "yt-dlp", "--ignore-config", "--no-playlist", "--no-warnings", "--format", "bv*+ba/b",
-                "--download-sections", f"*{start:.3f}-{end:.3f}",
-                "--force-keyframes-at-cuts", "--downloader", "ffmpeg",
-                "--merge-output-format", "mp4", "--output", template, safe_url,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=DOWNLOAD_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        _cleanup_partials(output_dir)
-        raise RuntimeError("Selected source range download timed out.") from exc
-    except FileNotFoundError as exc:
-        raise RuntimeError("yt-dlp/FFmpeg is not installed in the AI service environment.") from exc
-    except Exception:
-        _cleanup_partials(output_dir)
-        raise
-    if result.returncode != 0:
+
+    cmd = [
+        "yt-dlp", "--ignore-config", "--no-playlist", "--no-warnings", "--format", "bv*+ba/b",
+        "--download-sections", f"*{start:.3f}-{end:.3f}",
+        "--force-keyframes-at-cuts", "--downloader", "ffmpeg",
+        "--merge-output-format", "mp4", "--output", template, safe_url,
+    ]
+
+    last_error: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            _cleanup_partials(output_dir)
+            raise RuntimeError("Selected source range download timed out.") from exc
+        except FileNotFoundError as exc:
+            raise RuntimeError("yt-dlp/FFmpeg is not installed in the AI service environment.") from exc
+        except Exception as exc:
+            _cleanup_partials(output_dir)
+            raise exc
+
+        if result.returncode == 0:
+            break
+
         _cleanup_partials(output_dir)
         detail = (result.stderr or result.stdout or "").strip()
         detail = detail[-1200:] if detail else "The provider could not retrieve the selected section."
+        classified = classify_acquisition_error(detail)
+        last_error = classified
+
+        if isinstance(classified, TransientNetworkError) and attempt < MAX_RETRIES:
+            time.sleep(1.0 * (attempt + 1))
+            continue
         raise RuntimeError(f"Selected source range download failed: {detail}")
+
     candidates = sorted(
         path for path in output_dir.glob("source-range.*")
         if path.is_file() and path.suffix.lower() not in {".part", ".ytdl", ".temp"} and path.stat().st_size > 0

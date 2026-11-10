@@ -34,6 +34,12 @@ storage/
 # Prisma/generated
 web/generated/prisma/
 
+# local agent worktrees (never commit linked worktree directories)
+/.agent4-integration/
+/.agent5-ai-worktree/
+/.ai-pipeline-worktree/
+/.durable-job-reliability-worktree/
+
 # editor/OS
 .vscode/
 .idea/

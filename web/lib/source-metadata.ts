@@ -1,7 +1,17 @@
 import { getGoogleDriveMetadata } from "./sources/google-drive";
 import { resolveAiServiceUrl, AiServiceError, isPermanentFailure } from "./worker-config";
 
-export type SourceMetadata = { title: string | null; platform: string; duration: number; thumbnail: string | null };
+export type SourceMetadata = {
+  title: string | null;
+  platform: string;
+  duration: number;
+  thumbnail: string | null;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  codec?: string | null;
+  audioCodec?: string | null;
+};
 
 // Shared with the queue worker so both paths resolve the AI service the same way.
 const AI = resolveAiServiceUrl();
@@ -33,6 +43,11 @@ export async function getSourceMetadata(url: string, type: string, userId: strin
         platform: typeof result.platform === "string" ? result.platform : type,
         duration,
         thumbnail: typeof result.thumbnail === "string" ? result.thumbnail : null,
+        width: typeof result.width === "number" ? result.width : null,
+        height: typeof result.height === "number" ? result.height : null,
+        fps: typeof result.fps === "number" ? result.fps : null,
+        codec: typeof result.vcodec === "string" ? result.vcodec : null,
+        audioCodec: typeof result.acodec === "string" ? result.acodec : null,
       };
     } catch (error) {
       lastError = error;

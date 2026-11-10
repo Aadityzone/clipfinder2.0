@@ -3,8 +3,18 @@ from pydantic import BaseModel
 from .schemas import TranscribeRequest, TranscribeResponse
 from .transcribe import transcribe_media, transcription_capabilities
 from .services.analysis_range import extract_analysis_range, shift_segments_to_range, validate_analysis_range
-from .services.download import download, download_range, get_video_metadata
-from .services.media import ffprobe
+from .services.download import (
+    download,
+    download_range,
+    get_video_metadata,
+    PrivateOrDeletedVideoError,
+    RestrictedVideoError,
+    TransientNetworkError,
+    StorageLimitError,
+    UnsupportedSourceError,
+    CorruptedDownloadError,
+)
+from .services.media import ffprobe, CorruptedMediaError, MediaProbeError
 from .services.render import render
 from .highlights import candidates
 from .longform import stories, package
@@ -135,14 +145,28 @@ def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
             range_metadata = {"sourceDuration": source["duration"], "sourceStartS": start, "sourceEndS": min(end, source["duration"])}
         else:
             path = download(b.url, output_dir)
-        metadata = ffprobe(path)
+        metadata = ffprobe(path, strict=True)
         if not metadata.get("duration") or not metadata.get("width") or not metadata.get("height"):
-            raise RuntimeError("Downloaded media has no valid video stream or duration.")
+            raise CorruptedMediaError("Downloaded media has no valid video stream or duration.")
         if range_metadata:
             metadata.update(range_metadata)
         return {"media_path": path, "metadata": metadata}
+    except UnsupportedSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PrivateOrDeletedVideoError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RestrictedVideoError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except TransientNetworkError as e:
+        raise HTTPException(status_code=504, detail=str(e))
+    except StorageLimitError as e:
+        raise HTTPException(status_code=507, detail=str(e))
+    except (CorruptedMediaError, CorruptedDownloadError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -151,8 +175,18 @@ def source_metadata(b: SourceMetadataRequest, x_ai_secret: str | None = Header(d
     auth(x_ai_secret)
     try:
         return get_video_metadata(b.url)
+    except UnsupportedSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PrivateOrDeletedVideoError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RestrictedVideoError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except TransientNetworkError as e:
+        raise HTTPException(status_code=504, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
@@ -161,7 +195,14 @@ def probe(b: ProbeRequest, x_ai_secret: str | None = Header(default=None)):
     auth(x_ai_secret)
     if not os.path.isfile(b.media_path):
         raise HTTPException(status_code=404, detail="Media file not found")
-    return ffprobe(b.media_path)
+    try:
+        return ffprobe(b.media_path)
+    except CorruptedMediaError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except MediaProbeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/v1/thumbnail")
 def thumbnail(b: ThumbnailRequest, x_ai_secret: str | None = Header(default=None)):
@@ -280,7 +321,7 @@ def analyze(b: AnalyzeRequest, x_ai_secret: str | None = Header(default=None)):
         if not os.path.isfile(b.media_path):
             raise HTTPException(status_code=404, detail="Media file not found")
         media_duration = ffprobe(b.media_path).get("duration")
-    media = analyze_media(b.media_path) if b.media_path else {}
+    media = analyze_media(b.media_path, transcript_segments=b.segments) if b.media_path else {}
     if b.media_path and b.instruction and os.getenv("VISUAL_SEMANTIC_BACKEND", "").lower() == "clip":
         media["visualSemantic"] = semantic_frame_scores(b.media_path, b.instruction)
     result = candidates(b.segments, b.instruction, b.categories, media)

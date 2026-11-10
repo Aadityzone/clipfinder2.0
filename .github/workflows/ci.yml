@@ -1,5 +1,5 @@
 name: CI
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 concurrency:
   group: clipfinder-ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +22,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm install --include=optional
+      - run: npm ci --include=optional
+      - name: Audit npm dependencies
+        run: npm audit
       - run: npm ls lightningcss lightningcss-linux-x64-gnu @tailwindcss/oxide @tailwindcss/oxide-linux-x64-gnu
       - run: npm run prisma:generate
       - run: npx prisma validate --schema prisma/schema.prisma
@@ -41,6 +43,10 @@ jobs:
           cache: pip
           cache-dependency-path: ai/requirements-ci.txt
       - run: python -m pip install --upgrade pip
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
       - run: python -m pip install -r ai/requirements-ci.txt
       - run: python -m py_compile ai/main.py ai/schemas.py ai/transcribe.py ai/highlights.py ai/longform.py ai/services/render.py ai/services/media_intelligence.py ai/services/audio_intelligence.py ai/services/llm.py ai/services/dedup.py ai/services/captions.py
       - run: PYTHONPATH=. pytest -q

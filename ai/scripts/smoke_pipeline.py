@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import platform
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -79,9 +81,12 @@ def run_pipeline(
     top: int = 3,
     source_label: str | None = None,
 ) -> dict:
+    pipeline_started = time.perf_counter()
+    timings: dict[str, float] = {}
     if not source.is_file():
         raise SmokeStageError("source", FileNotFoundError(f"Source video does not exist: {source}"))
     output_dir.mkdir(parents=True, exist_ok=True)
+    stage_started = time.perf_counter()
     try:
         metadata = ffprobe(str(source))
     except Exception as exc:
@@ -91,18 +96,22 @@ def run_pipeline(
         raise SmokeStageError("media_probe", RuntimeError("Source video has no valid duration."))
     if not metadata.get("width") or not metadata.get("height"):
         raise SmokeStageError("media_probe", RuntimeError("Source does not contain a valid video stream."))
+    timings["ffprobeSeconds"] = round(time.perf_counter() - stage_started, 3)
 
+    stage_started = time.perf_counter()
     try:
         transcript_result = transcribe(str(source), language)
     except Exception as exc:
         raise SmokeStageError("transcription", exc) from exc
     segments = transcript_result.get("segments") or []
     transcript_text = str(transcript_result.get("text") or "")
+    timings["transcriptionSeconds"] = round(time.perf_counter() - stage_started, 3)
     (output_dir / "transcript.json").write_text(
         json.dumps(transcript_result, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
+    stage_started = time.perf_counter()
     try:
         analysis_result = analyze(AnalyzeRequest(
             segments=segments,
@@ -111,6 +120,7 @@ def run_pipeline(
         ))
     except Exception as exc:
         raise SmokeStageError("analysis", exc) from exc
+    timings["analysisAndRankingSeconds"] = round(time.perf_counter() - stage_started, 3)
     candidates = analysis_result.get("candidates") or []
     rendered = []
     for index, candidate in enumerate(candidates[:max(1, min(top, 10))], start=1):
@@ -120,6 +130,7 @@ def run_pipeline(
             continue
         filename = f"clip-{index:02d}.mp4"
         output_path = output_dir / filename
+        stage_started = time.perf_counter()
         try:
             render(
                 str(source),
@@ -141,6 +152,7 @@ def run_pipeline(
                 raise RuntimeError(f"Rendered output is not a playable video: {output_path}")
         except Exception as exc:
             raise SmokeStageError("render", exc) from exc
+        timings[f"render{index}Seconds"] = round(time.perf_counter() - stage_started, 3)
         rendered.append({
             "file": filename,
             "start": round(start, 3),
@@ -162,6 +174,24 @@ def run_pipeline(
             "width": metadata.get("width"),
             "height": metadata.get("height"),
             "hasAudio": metadata.get("hasAudio"),
+            "format": metadata.get("format"),
+            "sourceBytes": source.stat().st_size,
+        },
+        "performance": {
+            "stageSeconds": timings,
+            "pipelineSeconds": round(time.perf_counter() - pipeline_started, 3),
+            "realTimeFactor": round(duration / (time.perf_counter() - pipeline_started), 3)
+            if time.perf_counter() > pipeline_started else None,
+            "host": platform.platform(),
+            "processor": platform.processor() or None,
+            "python": platform.python_version(),
+            "device": "configured by AI service environment; inspect WHISPER_DEVICE and model settings",
+            "limitations": [
+                "Download is excluded for --source and is not yet timed for --url.",
+                "AI analysis and ranking are measured together; internal model stages are not individually instrumented.",
+                "CPU, RAM, GPU utilization, VRAM, concurrency, and cache hit rate are not sampled by this harness.",
+                "pipelineSeconds covers probe, transcription, analysis, candidate rendering and report assembly; for --url it excludes source download.",
+            ],
         },
         "transcription": {
             "language": transcript_result.get("language"),
