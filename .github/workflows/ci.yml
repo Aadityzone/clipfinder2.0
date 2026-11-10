@@ -1,5 +1,5 @@
 name: CI
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 concurrency:
   group: clipfinder-ci-${{ github.workflow }}-${{ github.ref }}
@@ -7,6 +7,9 @@ concurrency:
 
 jobs:
   web:
+    permissions:
+      contents: write
+      actions: write
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/clipfinder
       AUTH_SECRET: ci-auth-secret-not-for-production
@@ -33,6 +36,19 @@ jobs:
           name: npm-audit-remediated-lockfile
           path: package-lock.json
           if-no-files-found: error
+      - name: Commit patched lockfile and rerun CI on the updated PR head
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 35
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add package-lock.json
+            git commit -m 'chore(deps): commit compatible npm security updates'
+            git push origin "HEAD:${GITHUB_HEAD_REF}"
+            gh workflow run ci.yml --ref "${GITHUB_HEAD_REF}"
+          fi
       - name: Report npm dependency advisories
         continue-on-error: true
         run: |
