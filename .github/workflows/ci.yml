@@ -23,6 +23,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install --include=optional
+      - name: Apply non-breaking npm security fixes
+        continue-on-error: true
+        run: npm audit fix
+      - name: Upload npm audit-updated lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-remediated-lockfile
+          path: package-lock.json
+          if-no-files-found: error
       - name: Report npm dependency advisories
         continue-on-error: true
         run: |
