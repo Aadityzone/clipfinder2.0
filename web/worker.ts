@@ -1,6 +1,6 @@
+import "./lib/load-env";
 import http from "node:http";
 import https from "node:https";
-import "./lib/load-env";
 import { db } from "./lib/db";
 import { loadCreatorFeedbackProfile } from "./lib/creator-feedback";
 import {
