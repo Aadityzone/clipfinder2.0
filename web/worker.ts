@@ -1,4 +1,6 @@
 import "./lib/load-env";
+import http from "node:http";
+import https from "node:https";
 import { db } from "./lib/db";
 import { loadCreatorFeedbackProfile } from "./lib/creator-feedback";
 import {
@@ -158,20 +160,47 @@ async function ai(pathname: string, body: unknown, timeoutMs?: number) {
   const started = Date.now();
   log("info", "ai_call_start", { endpoint: pathname, timeoutMs: timeout });
   try {
-    const r = await fetch(AI + pathname, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(process.env.AI_SERVICE_SECRET ? { "x-ai-secret": process.env.AI_SERVICE_SECRET } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
+    // Node's built-in fetch (Undici) has a 300s default headers timeout.
+    // FastAPI's ingest route returns one JSON response after download + probe,
+    // so a valid long-running stage can be cut off at ~5 minutes. Use Node's
+    // HTTP client and align its inactivity timeout with the stage timeout.
+    const target = new URL(AI + pathname);
+    const transport = target.protocol === "https:" ? https : http;
+    const payload = JSON.stringify(body);
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(payload)),
+      ...(process.env.AI_SERVICE_SECRET ? { "x-ai-secret": process.env.AI_SERVICE_SECRET } : {}),
+    };
+    const response = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const request = transport.request(target, {
+        method: "POST",
+        headers,
+        signal: controller.signal,
+      }, (incoming) => {
+        const chunks: Buffer[] = [];
+        incoming.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        incoming.on("end", () => resolve({
+          statusCode: incoming.statusCode ?? 0,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }));
+        incoming.on("error", reject);
+      });
+      request.setTimeout(timeout, () => request.destroy(
+        new Error(`AI service call to ${pathname} had no socket activity for ${Math.round(timeout / 1000)}s`)
+      ));
+      request.on("error", reject);
+      request.end(payload);
     });
-    if (!r.ok) {
-      const detail = (await r.text().catch(() => "")).slice(0, 500);
-      throw new AiServiceError(pathname, r.status, detail);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new AiServiceError(pathname, response.statusCode, response.body.slice(0, 500));
     }
-    const result = await r.json();
+    let result: any;
+    try {
+      result = JSON.parse(response.body);
+    } catch (error) {
+      throw new Error(`AI service ${pathname} returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
     log("info", "ai_call_done", { endpoint: pathname, durationMs: Date.now() - started });
     return result;
   } catch (e: any) {
@@ -181,7 +210,13 @@ async function ai(pathname: string, body: unknown, timeoutMs?: number) {
         `AI service call to ${pathname} timed out after ${Math.round(timeout / 1000)}s (elapsed ${Math.round(durationMs / 1000)}s)`
       );
     }
-    log("error", "ai_call_failed", { endpoint: pathname, durationMs, error: e?.message });
+    const cause = e?.cause;
+    log("error", "ai_call_failed", {
+      endpoint: pathname,
+      durationMs,
+      error: e?.message,
+      cause: cause ? { name: cause.name, code: cause.code, message: cause.message } : undefined,
+    });
     throw e;
   } finally {
     clearTimeout(timer);
