@@ -7,6 +7,7 @@ import os
 import subprocess
 import tempfile
 
+from ai.services.transcription_chunking import transcribe_chunked
 from ai.transcribe import transcribe
 
 MAX_TRANSCRIPTION_RANGE_SECONDS = 60 * 60
@@ -64,7 +65,7 @@ def transcribe_range(
             detail = (exc.stderr or "FFmpeg could not extract audio for this source range.").strip()
             raise RuntimeError(detail[-1200:]) from exc
 
-        result = transcribe(audio_path, language)
+        result = transcribe_chunked(audio_path, language)
     for segment in result.get("segments", []):
         segment["start"] = round(float(segment["start"]) + start_value, 3)
         segment["end"] = round(float(segment["end"]) + start_value, 3)

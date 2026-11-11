@@ -143,7 +143,7 @@ def candidates(segments, instruction=None, categories=None, media=None):
             "rationale": "Ranked from transcript, audio, visual change/motion, face presence and available on-screen action cues.",
             "features": {
                 "wordCount": len(_words(text)),
-                "segmentIndex": idx,
+                "segmentIndex": idx,    
                 "categoryMatches": matches,
                 "faceHits": face_hits,
                 "faceFocusX": round(focus_x, 4),

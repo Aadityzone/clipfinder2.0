@@ -32,6 +32,37 @@ def test_render_burns_ass_captions_into_final_mp4(tmp_path):
     validate.assert_called_once_with(str(output), 4.0)
 
 
+def test_render_single_pass_fast_combines_filters_into_single_command(tmp_path):
+    output = tmp_path / "fast_clip.mp4"
+    captions = [{"start": 0.0, "end": 1.2, "text": "Speedy caption"}]
+
+    with patch("ai.services.render.subprocess.run") as run, patch(
+        "ai.services.render.validate_render_output"
+    ) as validate:
+        render(
+            input_path=str(tmp_path / "source.mp4"),
+            output_path=str(output),
+            start=0,
+            end=4,
+            captions=captions,
+            caption_style={"font": "Arial", "size": 32},
+            single_pass=True,
+        )
+
+    assert run.call_count == 1
+    command = run.call_args.args[0]
+    assert "-vf" in command
+    vf_arg = command[command.index("-vf") + 1]
+    assert "scale=1080:1920" in vf_arg
+    assert "crop=1080:1920" in vf_arg
+    assert "ass=" in vf_arg
+    assert command[command.index("-map") + 1] == "0:v:0"
+    assert command[command.index("-map", command.index("-map") + 1) + 1] == "0:a?"
+    assert "-c:v" in command and "libx264" in command
+    assert str(output) == command[-1]
+    validate.assert_called_once_with(str(output), 4.0)
+
+
 def test_render_without_captions_uses_single_render_pass(tmp_path):
     output = tmp_path / "clip.mp4"
 

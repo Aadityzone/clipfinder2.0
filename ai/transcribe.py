@@ -360,4 +360,6 @@ def transcribe_media(
         from .services.transcription_range import transcribe_range
 
         return transcribe_range(path, start, end, source_duration, language)
-    return transcribe(path, language)
+    from .services.transcription_chunking import transcribe_chunked
+
+    return transcribe_chunked(path, language)

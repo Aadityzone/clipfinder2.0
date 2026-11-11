@@ -77,6 +77,7 @@ def render(
     captions: list[dict] | None = None,
     caption_style: dict | None = None,
     focus_x: float = 0.5,
+    single_pass: bool | None = None,
 ):
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     segs = _normalize_segments(start, end, segments)
@@ -154,8 +155,35 @@ def render(
         validate_render_output(output_path, expected_duration)
         return
 
-    # Burn captions after assembling the complete edit so cue timestamps remain
-    # relative to the final clip, including edits with multiple source segments.
+    # Determine if single-pass fast rendering should be used.
+    # Single-pass combines scaling, cropping, and caption burning into a single
+    # filterchain pass, avoiding a 2x re-encode cycle for single-segment clips.
+    use_single_pass = single_pass if single_pass is not None else (
+        os.getenv("FAST_RENDER", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
+
+    if use_single_pass and len(segs) == 1:
+        with tempfile.TemporaryDirectory(prefix="clipfinder-caption-") as directory:
+            ass_path = os.path.join(directory, "captions.ass")
+            write_ass(captions, ass_path, caption_style)
+            combined_filter = f"{vf},ass='{_escape_filter_path(ass_path)}'"
+            segment = segs[0]
+            duration = max(0.01, float(segment["end"]) - float(segment["start"]))
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-ss", str(segment["start"]), "-i", input_path,
+                    "-t", str(duration), "-vf", combined_filter, *stream_args,
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                    "-c:a", "aac", "-movflags", "+faststart", output_path,
+                ],
+                check=True,
+                timeout=1800,
+            )
+        validate_render_output(output_path, expected_duration)
+        return
+
+    # Multi-pass fallback: burn captions after assembling the complete edit so
+    # cue timestamps remain relative to the final clip for multi-segment cuts.
     with tempfile.TemporaryDirectory(prefix="clipfinder-caption-") as directory:
         base_path = os.path.join(directory, "base.mp4")
         ass_path = os.path.join(directory, "captions.ass")

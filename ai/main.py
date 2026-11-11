@@ -94,6 +94,7 @@ class RenderRequest(BaseModel):
     captions: list[dict] | None = None
     caption_style: dict | None = None
     focus_x: float = 0.5
+    single_pass: bool = True
 
 def auth(secret: str | None):
     expected = os.getenv("AI_SERVICE_SECRET")
@@ -446,7 +447,7 @@ def render_route(b: RenderRequest, x_ai_secret: str | None = Header(default=None
     auth(x_ai_secret)
     try:
         render(b.input_path, b.output_path, b.start, b.end, b.aspect, b.segments,
-               b.captions, b.caption_style, b.focus_x)
+               b.captions, b.caption_style, b.focus_x, single_pass=b.single_pass)
         if not os.path.isfile(b.output_path) or os.path.getsize(b.output_path) < 1024:
             raise RuntimeError("Render output was not created or is invalid")
         return {"output_path": b.output_path, "size": os.path.getsize(b.output_path)}
