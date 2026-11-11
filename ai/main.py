@@ -38,6 +38,7 @@ import uuid
 import importlib.util
 import shutil
 import tempfile
+import time
 import subprocess
 
 app = FastAPI(title="Clip Finder AI", version="2.2.0")
@@ -136,19 +137,32 @@ def ingest(b: IngestRequest, x_ai_secret: str | None = Header(default=None)):
         if has_start != has_end:
             raise ValueError("Both start_seconds and end_seconds are required for a selected source range.")
         range_metadata = None
+        metadata_seconds = 0.0
         output_dir = os.path.join(b.output_dir, uuid.uuid4().hex)
         if has_start:
+            meta_started = time.perf_counter()
             source = get_video_metadata(b.url)
+            metadata_seconds = round(time.perf_counter() - meta_started, 3)
             start, end = float(b.start_seconds), float(b.end_seconds)
             if start < 0 or end <= start or end > source["duration"] + 0.05 or end - start > 3 * 60 * 60:
                 raise ValueError("Selected source range is outside the source duration or exceeds three hours.")
+            dl_started = time.perf_counter()
             path = download_range(b.url, output_dir, start, min(end, source["duration"]))
+            download_seconds = round(time.perf_counter() - dl_started, 3)
             range_metadata = {"sourceDuration": source["duration"], "sourceStartS": start, "sourceEndS": min(end, source["duration"])}
         else:
+            dl_started = time.perf_counter()
             path = download(b.url, output_dir)
+            download_seconds = round(time.perf_counter() - dl_started, 3)
         metadata = ffprobe(path, strict=True)
         if not metadata.get("duration") or not metadata.get("width") or not metadata.get("height"):
             raise CorruptedMediaError("Downloaded media has no valid video stream or duration.")
+        bytes_transferred = os.path.getsize(path) if os.path.isfile(path) else 0
+        metadata.update({
+            "downloadSeconds": download_seconds,
+            "metadataSeconds": metadata_seconds,
+            "bytesTransferred": bytes_transferred,
+        })
         if range_metadata:
             metadata.update(range_metadata)
         return {"media_path": path, "metadata": metadata}

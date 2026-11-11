@@ -37,13 +37,49 @@ export async function enqueueJob(
   });
 }
 
+const STAGE_DEFAULT_PRIORITY: Record<string, number> = {
+  ANALYZE: 60,
+  LONGFORM_ANALYZE: 60,
+  TRANSCRIBE: 50,
+  INGEST: 40,
+  RENDER: 30,
+};
+
+/** Compute effective queue priority for a job (higher runs first). */
+export function jobPriorityOf(job: { type?: string | null; payload?: unknown }): number {
+  const payload =
+    job.payload && typeof job.payload === "object"
+      ? (job.payload as Record<string, unknown>)
+      : null;
+  const explicit = payload ? Number(payload.priority) : Number.NaN;
+  if (Number.isFinite(explicit)) return explicit;
+  return STAGE_DEFAULT_PRIORITY[String(job.type ?? "").toUpperCase()] ?? 20;
+}
+
+/** Sort claimable candidates by priority descending, then FIFO by createdAt. */
+export function sortJobsByPriority<T extends { type?: string | null; payload?: unknown; createdAt?: Date | string }>(
+  candidates: T[]
+): T[] {
+  return candidates.slice().sort((a, b) => {
+    const diff = jobPriorityOf(b) - jobPriorityOf(a);
+    if (diff !== 0) return diff;
+    const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return aTime - bTime;
+  });
+}
+
 /**
  * Atomically claim one runnable job. Heartbeats refresh startedAt while a worker
  * is active; stale jobs in any active processing stage can be recovered after a
  * crash. A crashed worker is capped by the same attempt ceiling as failures, so a
  * job that keeps losing its worker does not loop forever.
+ *
+ * When the client supports `findMany`, higher-priority jobs (such as top
+ * initial clip renders or chunk analysis) are claimed before lower-priority
+ * background work, falling back cleanly for minimal test doubles.
  */
-export async function claimNextJob(client: DbClient = db) {
+export async function claimNextJob(client: DbClient = db, options?: { excludeTypes?: string[] }) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_AFTER_MS);
   // A worker can disappear without reaching failJob (process kill, host
@@ -64,6 +100,10 @@ export async function claimNextJob(client: DbClient = db) {
   });
 
   const runnable = { OR: [{ runAfter: null }, { runAfter: { lte: now } }] };
+  const typeFilter =
+    options?.excludeTypes && options.excludeTypes.length > 0
+      ? [{ type: { notIn: options.excludeTypes } }]
+      : [];
   const claimable = {
     AND: [
       {
@@ -73,23 +113,161 @@ export async function claimNextJob(client: DbClient = db) {
         ],
       },
       runnable,
+      ...typeFilter,
     ],
   };
-  const candidate = await client.job.findFirst({ where: claimable, orderBy: { createdAt: "asc" } });
-  if (!candidate) return null;
 
-  const claimed = await client.job.updateMany({
-    where: { AND: [{ id: candidate.id }, ...claimable.AND] },
-    data: {
-      status: "RETRYING",
-      startedAt: now,
-      attempts: { increment: 1 },
-      finishedAt: null,
-      error: null,
-      runAfter: null,
-    },
+  const hasFindMany = typeof (client.job as { findMany?: unknown }).findMany === "function";
+  let orderedCandidates: Array<{ id: string; type?: string | null; payload?: unknown; createdAt?: Date }>;
+  if (hasFindMany) {
+    const rows = await client.job.findMany({
+      where: claimable,
+      orderBy: { createdAt: "asc" },
+      take: 25,
+    });
+    if (!rows.length) return null;
+    orderedCandidates = sortJobsByPriority(rows);
+  } else {
+    const candidate = await client.job.findFirst({ where: claimable, orderBy: { createdAt: "asc" } });
+    if (!candidate) return null;
+    orderedCandidates = [candidate];
+  }
+
+  for (const candidate of orderedCandidates) {
+    const claimed = await client.job.updateMany({
+      where: { AND: [{ id: candidate.id }, ...claimable.AND] },
+      data: {
+        status: "RETRYING",
+        startedAt: now,
+        attempts: { increment: 1 },
+        finishedAt: null,
+        error: null,
+        runAfter: null,
+      },
+    });
+    if (claimed.count) {
+      return client.job.findUnique({ where: { id: candidate.id } });
+    }
+  }
+  return null;
+}
+
+/**
+ * Cancel a job and propagate cancellation to all sibling queued/active jobs in
+ * the same project so progressive chunks and queued renders halt cleanly.
+ */
+export async function cancelProjectJobs(
+  params: { jobId: string; userId: string; projectId?: string | null },
+  client: DbClient = db
+) {
+  const now = new Date();
+  const cancellableStatuses = ["QUEUED", ...ACTIVE_JOB_STATUSES] as Array<
+    "QUEUED" | (typeof ACTIVE_JOB_STATUSES)[number]
+  >;
+
+  const where = params.projectId
+    ? {
+        userId: params.userId,
+        projectId: params.projectId,
+        status: { in: cancellableStatuses },
+      }
+    : {
+        id: params.jobId,
+        userId: params.userId,
+        status: { in: cancellableStatuses },
+      };
+
+  const changed = await client.job.updateMany({
+    where,
+    data: { status: "CANCELLED", finishedAt: now, runAfter: null },
   });
-  return claimed.count ? client.job.findUnique({ where: { id: candidate.id } }) : null;
+
+  if (params.projectId && changed.count > 0) {
+    const dbAny = client as unknown as {
+      render?: { updateMany?: (args: unknown) => Promise<unknown> };
+      clip?: { updateMany?: (args: unknown) => Promise<unknown> };
+    };
+    if (typeof dbAny.render?.updateMany === "function") {
+      await dbAny.render.updateMany({
+        where: {
+          clip: { projectId: params.projectId },
+          status: { in: ["QUEUED", "PROCESSING"] },
+        },
+        data: { status: "FAILED", error: "Cancelled by user." },
+      });
+    }
+    if (typeof dbAny.clip?.updateMany === "function") {
+      await dbAny.clip.updateMany({
+        where: {
+          projectId: params.projectId,
+          status: "RENDERING",
+        },
+        data: { status: "CANDIDATE" },
+      });
+    }
+  }
+
+  return changed.count;
+}
+
+export interface BatchJobCreateSpec {
+  userId: string;
+  projectId: string | null;
+  type: string;
+  payload: Record<string, unknown>;
+  dedupeKeyPath?: string[];
+  dedupeValue?: unknown;
+  runAfter?: Date;
+}
+
+/**
+ * Atomically finish an active job and create one or more successor jobs (with
+ * optional idempotency check per successor) inside a single transaction.
+ */
+export async function completeJobAndEnqueueMany(
+  id: string,
+  specs: BatchJobCreateSpec[],
+  options?: { expectedAttempts?: number },
+  client: DbClient = db,
+) {
+  return client.$transaction(async (tx) => {
+    const completed = await tx.job.updateMany({
+      where: {
+        id,
+        status: { in: activeJobStatuses() },
+        ...(options?.expectedAttempts === undefined ? {} : { attempts: options.expectedAttempts }),
+      },
+      data: { status: "READY", progress: 1, finishedAt: new Date(), runAfter: null, error: null },
+    });
+    if (!completed.count) return [];
+
+    const created: Array<Awaited<ReturnType<typeof tx.job.create>>> = [];
+    for (const spec of specs) {
+      if (spec.projectId && spec.dedupeKeyPath && spec.dedupeValue !== undefined) {
+        const existing = await tx.job.findFirst({
+          where: {
+            projectId: spec.projectId,
+            type: spec.type,
+            status: { notIn: ["CANCELLED", "FAILED"] },
+            payload: { path: spec.dedupeKeyPath, equals: spec.dedupeValue as any },
+          },
+        });
+        if (existing) continue;
+      }
+      const row = await tx.job.create({
+        data: {
+          userId: spec.userId,
+          projectId: spec.projectId,
+          type: spec.type,
+          payload: spec.payload as any,
+          status: "QUEUED",
+          runAfter: spec.runAfter,
+        },
+      });
+      created.push(row);
+    }
+    return created;
+  });
 }
 
 /**

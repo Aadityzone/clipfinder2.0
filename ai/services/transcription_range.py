@@ -7,7 +7,12 @@ import os
 import subprocess
 import tempfile
 
-from ai.services.transcription_chunking import transcribe_chunked
+from ai.services.transcription_chunking import (
+    DEFAULT_CHUNK_DURATION_SECONDS,
+    DEFAULT_OVERLAP_SECONDS,
+    deduplicate_boundary_words,
+    iter_transcribe_chunks,
+)
 from ai.transcribe import transcribe
 
 MAX_TRANSCRIPTION_RANGE_SECONDS = 60 * 60
@@ -44,6 +49,35 @@ def transcribe_range(
     """Extract a bounded audio range, transcribe it, and restore source timestamps."""
     start_value, end_value = validate_transcription_range(start, end, source_duration)
     duration = end_value - start_value
+
+    if duration > DEFAULT_CHUNK_DURATION_SECONDS:
+        # For long intervals, stream bounded chunks directly without loading
+        # the whole interval into a temporary WAV file or monolithic RAM array.
+        raw_segments: list[dict] = []
+        detected_language = language or "en"
+        for chunk_res in iter_transcribe_chunks(
+            media_path,
+            start_seconds=start_value,
+            end_seconds=end_value,
+            language=language,
+            chunk_duration_s=DEFAULT_CHUNK_DURATION_SECONDS,
+            overlap_s=DEFAULT_OVERLAP_SECONDS,
+            fail_fast=True,
+        ):
+            raw_segments.extend(chunk_res.get("segments") or [])
+            if chunk_res.get("language") and not language:
+                detected_language = chunk_res["language"]
+        deduped = deduplicate_boundary_words(raw_segments, tolerance_s=DEFAULT_OVERLAP_SECONDS * 0.75)
+        full_text = " ".join(str(s.get("text", "")).strip() for s in deduped if str(s.get("text", "")).strip())
+        return {
+            "language": detected_language,
+            "text": full_text,
+            "segments": deduped,
+            "duration": round(duration, 3),
+            "sourceStartS": start_value,
+            "sourceEndS": end_value,
+        }
+
     with tempfile.TemporaryDirectory(prefix="clipfinder-transcribe-range-") as temporary:
         audio_path = os.path.join(temporary, "range.wav")
         try:
@@ -65,7 +99,7 @@ def transcribe_range(
             detail = (exc.stderr or "FFmpeg could not extract audio for this source range.").strip()
             raise RuntimeError(detail[-1200:]) from exc
 
-        result = transcribe_chunked(audio_path, language)
+        result = transcribe(audio_path, language)
     for segment in result.get("segments", []):
         segment["start"] = round(float(segment["start"]) + start_value, 3)
         segment["end"] = round(float(segment["end"]) + start_value, 3)

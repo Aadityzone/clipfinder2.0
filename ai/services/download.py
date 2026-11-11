@@ -28,6 +28,10 @@ METADATA_TIMEOUT_SECONDS = 30
 MIN_FREE_DISK_BYTES = int(os.getenv("MIN_FREE_DISK_BYTES", str(500 * 1024 * 1024)))
 MAX_DOWNLOAD_SIZE_BYTES = int(os.getenv("MAX_DOWNLOAD_SIZE_BYTES", str(15 * 1024 * 1024 * 1024)))  # 15GB default
 MAX_RETRIES = int(os.getenv("DOWNLOAD_MAX_RETRIES", "2"))
+DEFAULT_YTDLP_FORMAT = os.getenv(
+    "YTDLP_FORMAT",
+    "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
+)
 
 
 # --- Error Hierarchy ---
@@ -197,7 +201,7 @@ def download(url: str, out_dir: str) -> str:
         "--no-warnings",
         "--continue",
         "--max-filesize", str(MAX_DOWNLOAD_SIZE_BYTES),
-        "--format", "bv*+ba/b",
+        "--format", DEFAULT_YTDLP_FORMAT,
         "--merge-output-format", "mp4",
         "--output", template,
         safe_url,
@@ -318,7 +322,7 @@ def download_range(url: str, out_dir: str, start_seconds: float, end_seconds: fl
     template = str(output_dir / "source-range.%(ext)s")
 
     cmd = [
-        "yt-dlp", "--ignore-config", "--no-playlist", "--no-warnings", "--format", "bv*+ba/b",
+        "yt-dlp", "--ignore-config", "--no-playlist", "--no-warnings", "--format", DEFAULT_YTDLP_FORMAT,
         "--download-sections", f"*{start:.3f}-{end:.3f}",
         "--force-keyframes-at-cuts", "--downloader", "ffmpeg",
         "--merge-output-format", "mp4", "--output", template, safe_url,

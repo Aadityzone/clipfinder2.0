@@ -142,3 +142,146 @@ test("claim compare-and-set yields no job when another worker wins", async () =>
   };
   assert.equal(await jobs.claimNextJob(state.client), null);
 });
+
+test("claimNextJob prioritizes higher-priority jobs over older queued jobs", async () => {
+  const olderLowPriority = {
+    id: "job-low",
+    type: "RENDER",
+    status: "QUEUED",
+    attempts: 0,
+    payload: { priority: 10 },
+    createdAt: new Date(1000),
+    startedAt: null,
+    finishedAt: null,
+    runAfter: null,
+    error: null,
+  };
+  const newerHighPriority = {
+    id: "job-high",
+    type: "RENDER",
+    status: "QUEUED",
+    attempts: 0,
+    payload: { priority: 100 },
+    createdAt: new Date(2000),
+    startedAt: null,
+    finishedAt: null,
+    runAfter: null,
+    error: null,
+  };
+  const rows = [olderLowPriority, newerHighPriority];
+  const client: any = {
+    job: {
+      findMany: async () => rows.filter((r) => r.status === "QUEUED"),
+      findUnique: async ({ where }: any) => rows.find((r) => r.id === where.id) ?? null,
+      updateMany: async ({ where, data }: any) => {
+        const targetId = where.AND?.[0]?.id;
+        if (!targetId) return { count: 0 };
+        const row = rows.find((r) => r.id === targetId);
+        if (!row) return { count: 0 };
+        row.status = data.status;
+        return { count: 1 };
+      },
+    },
+  };
+
+  const claimed = await jobs.claimNextJob(client);
+  assert.equal(claimed?.id, "job-high");
+});
+
+test("cancelProjectJobs propagates cancellation across all project jobs, renders, and rendering clips", async () => {
+  const jobRows = [
+    { id: "j1", userId: "u1", projectId: "p1", status: "TRANSCRIBING" },
+    { id: "j2", userId: "u1", projectId: "p1", status: "QUEUED" },
+    { id: "j3", userId: "u1", projectId: "p1", status: "READY" },
+  ];
+  const renderRows = [
+    { id: "r1", projectId: "p1", status: "QUEUED", error: null as string | null },
+    { id: "r2", projectId: "p1", status: "READY", error: null as string | null },
+  ];
+  const clipRows = [
+    { id: "c1", projectId: "p1", status: "RENDERING" },
+    { id: "c2", projectId: "p1", status: "READY" },
+  ];
+
+  const client: any = {
+    job: {
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const r of jobRows) {
+          if (r.projectId === where.projectId && where.status.in.includes(r.status)) {
+            r.status = data.status;
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+    render: {
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const r of renderRows) {
+          if (r.projectId === where.clip.projectId && where.status.in.includes(r.status)) {
+            r.status = data.status;
+            r.error = data.error;
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+    clip: {
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const c of clipRows) {
+          if (c.projectId === where.projectId && c.status === where.status) {
+            c.status = data.status;
+            count += 1;
+          }
+        }
+        return { count };
+      },
+    },
+  };
+
+  const count = await jobs.cancelProjectJobs({ jobId: "j1", userId: "u1", projectId: "p1" }, client);
+  assert.equal(count, 2);
+  assert.equal(jobRows[0].status, "CANCELLED");
+  assert.equal(jobRows[1].status, "CANCELLED");
+  assert.equal(jobRows[2].status, "READY");
+  assert.equal(renderRows[0].status, "FAILED");
+  assert.equal(renderRows[1].status, "READY");
+  assert.equal(clipRows[0].status, "CANDIDATE");
+  assert.equal(clipRows[1].status, "READY");
+});
+
+test("completeJobAndEnqueueMany finishes active job and deduplicates chunk successors", async () => {
+  const active = fakeClient(job("TRANSCRIBING", 1));
+  const specs = [
+    {
+      userId: "u1",
+      projectId: "p1",
+      type: "ANALYZE",
+      payload: { transcriptId: "t1" },
+      dedupeKeyPath: ["transcriptId"],
+      dedupeValue: "t1",
+    },
+    {
+      userId: "u1",
+      projectId: "p1",
+      type: "TRANSCRIBE",
+      payload: { rangeCursorSeconds: 300 },
+      dedupeKeyPath: ["rangeCursorSeconds"],
+      dedupeValue: 300,
+    },
+  ];
+  active.client.job.findFirst = async ({ where }: any) => {
+    const val = where.payload?.equals;
+    return active.enqueued.find((item: any) =>
+      Object.values(item.payload).includes(val)
+    ) || null;
+  };
+
+  const created = await jobs.completeJobAndEnqueueMany("job-1", specs, { expectedAttempts: 1 }, active.client);
+  assert.equal(active.getCurrent()?.status, "READY");
+  assert.equal(created.length, 2);
+});

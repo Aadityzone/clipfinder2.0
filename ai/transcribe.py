@@ -1,3 +1,5 @@
+import inspect
+import logging
 import math
 import os
 import subprocess
@@ -8,6 +10,8 @@ from typing import Any
 import numpy as np
 
 from .services.media import ffprobe
+
+logger = logging.getLogger("clipfinder.transcribe")
 
 try:
     from faster_whisper import WhisperModel
@@ -20,6 +24,12 @@ _model: Any = None
 _model_lock = threading.Lock()
 _load_thread: threading.Thread | None = None
 _load_result: dict[str, Any] = {}
+_model_device: str = "auto"
+_requested_device: str = "auto"
+_model_compute_type: str = "int8"
+_fallback_reason: str | None = None
+_cpu_threads: int = 0
+_num_workers: int = 1
 
 DEFAULT_TRANSCRIBE_TIMEOUT = float(os.getenv("WHISPER_TIMEOUT_SECONDS", "3600"))
 DEFAULT_LOAD_TIMEOUT = float(os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS", "300"))
@@ -28,8 +38,32 @@ DEFAULT_LOAD_TIMEOUT = float(os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS", "300"))
 WHISPER_SAMPLE_RATE = 16000
 
 
-def decode_audio(path: str, sample_rate: int = WHISPER_SAMPLE_RATE) -> np.ndarray:
-    """Decode any media file to mono float32 PCM at ``sample_rate`` using ffmpeg.
+def _positive_int(raw: str | None, fallback: int) -> int:
+    try:
+        value = int(raw) if raw is not None and raw.strip() else fallback
+    except (TypeError, ValueError):
+        return fallback
+    return value if value > 0 else fallback
+
+
+def _default_cpu_tuning() -> tuple[int, int]:
+    """Select balanced CPU thread and CTranslate2 worker counts for local hardware."""
+    cores = os.cpu_count() or 4
+    # On 16-thread CPUs (e.g. i5-13450HX), 4 threads x 2 workers avoids cache thrashing.
+    default_workers = 2 if cores >= 8 else 1
+    default_threads = max(2, min(8, cores // max(1, default_workers)))
+    threads = _positive_int(os.getenv("WHISPER_CPU_THREADS"), default_threads)
+    workers = _positive_int(os.getenv("WHISPER_NUM_WORKERS"), default_workers)
+    return threads, workers
+
+
+def decode_audio(
+    path: str,
+    sample_rate: int = WHISPER_SAMPLE_RATE,
+    start_seconds: float | None = None,
+    end_seconds: float | None = None,
+) -> np.ndarray:
+    """Decode full media or a bounded [start_seconds, end_seconds] interval to mono 16kHz float32 PCM.
 
     faster-whisper would decode this itself through PyAV, but its decoder calls
     ``av.open(input_file, mode="r", metadata_errors="ignore")`` and the installed
@@ -38,17 +72,17 @@ def decode_audio(path: str, sample_rate: int = WHISPER_SAMPLE_RATE) -> np.ndarra
     before reading a single sample. ffmpeg is already a hard dependency of this
     service, so decode here and hand Whisper an array; faster-whisper skips its
     PyAV path entirely when the input is already a numpy array.
-
-    Keeping this as a module-level function also makes the decode step
-    replaceable in tests and keeps transcription independent of a decoder whose
-    version skew can silently break it.
     """
-    command = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
-        "-i", path,
+    command = ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
+    if start_seconds is not None and end_seconds is not None:
+        duration = max(0.01, float(end_seconds) - float(start_seconds))
+        command.extend(["-ss", f"{float(start_seconds):.3f}", "-i", path, "-t", f"{duration:.3f}"])
+    else:
+        command.extend(["-i", path])
+    command.extend([
         "-vn", "-ac", "1", "-ar", str(sample_rate),
         "-f", "f32le", "-acodec", "pcm_f32le", "-",
-    ]
+    ])
     try:
         completed = subprocess.run(command, capture_output=True, check=False)
     except OSError as exc:
@@ -78,18 +112,43 @@ def _positive_seconds(raw: str | None, fallback: float) -> float:
     return value if math.isfinite(value) and value > 0 else fallback
 
 
+def _construct_whisper_model(
+    model_name: str,
+    device: str,
+    compute: str,
+    local_only: bool,
+    cpu_threads: int,
+    num_workers: int,
+) -> Any:
+    """Instantiate WhisperModel while staying compatible with test doubles."""
+    kwargs: dict[str, Any] = {
+        "device": device,
+        "compute_type": compute,
+        "local_files_only": local_only,
+    }
+    try:
+        params = inspect.signature(WhisperModel).parameters
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if (accepts_kwargs or "cpu_threads" in params) and cpu_threads > 0:
+            kwargs["cpu_threads"] = cpu_threads
+        if (accepts_kwargs or "num_workers" in params) and num_workers > 1:
+            kwargs["num_workers"] = num_workers
+    except (TypeError, ValueError):
+        pass
+    return WhisperModel(model_name, **kwargs)
+
+
 def _start_load(model_name: str, device: str, compute: str, local_only: bool) -> None:
     """Run the blocking model load on a daemon thread so it can be time-bounded."""
-    global _load_thread, _load_result
+    global _load_thread, _load_result, _cpu_threads, _num_workers
     result: dict[str, Any] = {}
+    threads, workers = _default_cpu_tuning()
+    _cpu_threads, _num_workers = threads, workers
 
     def _worker() -> None:
         try:
-            result["model"] = WhisperModel(
-                model_name,
-                device=device,
-                compute_type=compute,
-                local_files_only=local_only,
+            result["model"] = _construct_whisper_model(
+                model_name, device, compute, local_only, threads, workers
             )
         except BaseException as exc:  # surfaced to the caller as a clear error
             result["error"] = exc
@@ -149,29 +208,42 @@ def _load_once(
         # call must not mistake the dead thread for a load still in flight.
         global _load_thread
         _load_thread = None
-    global _model_device
+    global _model_device, _model_compute_type
     _model_device = device
+    _model_compute_type = compute
+    logger.info(
+        "whisper_model_loaded model=%s device=%s compute_type=%s cpu_threads=%s num_workers=%s",
+        model_name, device, compute, _cpu_threads, _num_workers,
+    )
     return result
 
 
-def _reload_on_cpu(model_name: str | None = None) -> Any:
+def _reload_on_cpu(model_name: str | None = None, reason: str | None = None) -> Any:
     """Rebuild the process model on CPU after a GPU-only library failure."""
-    global _model
-    name = model_name or os.getenv("WHISPER_MODEL", "small")
-    timeout = _positive_seconds(
-        os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS"), DEFAULT_LOAD_TIMEOUT
-    )
-    _model = _load_once(
-        name,
-        timeout,
-        "cpu",
-        os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
-        _env_flag("WHISPER_LOCAL_FILES_ONLY", False),
-    )
-    return _model
+    global _model, _fallback_reason
+    with _model_lock:
+        if _model is not None and _model_device_hint() == "cpu":
+            return _model
+        name = model_name or os.getenv("WHISPER_MODEL", "small")
+        timeout = _positive_seconds(
+            os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS"), DEFAULT_LOAD_TIMEOUT
+        )
+        compute = os.getenv("WHISPER_CPU_COMPUTE_TYPE") or os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+        if reason:
+            _fallback_reason = reason
+            logger.warning("whisper_cuda_fallback_to_cpu reason=%s", reason)
+        _model = _load_once(
+            name,
+            timeout,
+            "cpu",
+            compute,
+            _env_flag("WHISPER_LOCAL_FILES_ONLY", False),
+        )
+        return _model
 
 
 def _finite(value: Any) -> float | None:
+    """Coerce a timestamp or score to a finite float without raising."""
     try:
         number = float(value)
     except (TypeError, ValueError, OverflowError):
@@ -191,7 +263,7 @@ def model():
     install (torch bundles CUDA headers but not cublas/cudnn runtime DLLs) keep
     their transcription capability instead of failing every request.
     """
-    global _model
+    global _model, _requested_device, _fallback_reason
     if _model is None:
         with _model_lock:
             if _model is None:
@@ -206,14 +278,38 @@ def model():
                 compute = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
                 local_only = _env_flag("WHISPER_LOCAL_FILES_ONLY", False)
                 requested_device = os.getenv("WHISPER_DEVICE", "auto")
+                _requested_device = requested_device
                 try:
-                    _model = _load_once(model_name, timeout, requested_device, compute, local_only)
+                    candidate = _load_once(model_name, timeout, requested_device, compute, local_only)
+                    if (
+                        requested_device.strip().lower() in {"auto", "gpu", "cuda"}
+                        and _model_device_hint() != "cpu"
+                        and callable(getattr(candidate, "transcribe", None))
+                        and hasattr(candidate, "feature_extractor")
+                    ):
+                        # Exercise a tiny silent slice under _model_lock so lazy CUDA
+                        # runtime errors (e.g. missing cublas64_12.dll) fall back
+                        # once cleanly before concurrent worker threads use the model.
+                        segs, _info = candidate.transcribe(
+                            np.zeros(3200, dtype=np.float32),
+                            vad_filter=False,
+                            word_timestamps=False,
+                        )
+                        for _ in segs:
+                            break
+                    _model = candidate
+                    _fallback_reason = None
                 except RuntimeError as primary_error:
                     if requested_device.strip().lower() in {"auto", "gpu", "cuda"} and _looks_like_cuda_failure(primary_error):
-                        _model = _load_once(model_name, timeout, "cpu", compute, local_only)
+                        _fallback_reason = str(primary_error)
+                        logger.warning("whisper_load_fallback_to_cpu reason=%s", _fallback_reason)
+                        cpu_compute = os.getenv("WHISPER_CPU_COMPUTE_TYPE") or compute
+                        _model = _load_once(model_name, timeout, "cpu", cpu_compute, local_only)
                     else:
                         raise
     return _model
+
+
 def transcription_capabilities() -> dict:
     available = WhisperModel is not None
     return {
@@ -221,6 +317,12 @@ def transcription_capabilities() -> dict:
         "model": os.getenv("WHISPER_MODEL", "small") if available else None,
         "reason": None if available else "faster-whisper could not be loaded",
         "loaded": _model is not None,
+        "device": _model_device_hint() if _model is not None else os.getenv("WHISPER_DEVICE", "auto"),
+        "requestedDevice": os.getenv("WHISPER_DEVICE", "auto"),
+        "computeType": _model_compute_type if _model is not None else os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
+        "cpuThreads": _cpu_threads,
+        "numWorkers": _num_workers,
+        "fallbackReason": _fallback_reason,
         "localFilesOnly": _env_flag("WHISPER_LOCAL_FILES_ONLY", False),
         "loadTimeoutSeconds": _positive_seconds(
             os.getenv("WHISPER_LOAD_TIMEOUT_SECONDS"), DEFAULT_LOAD_TIMEOUT
@@ -228,13 +330,33 @@ def transcription_capabilities() -> dict:
     }
 
 
-def _finite(value: Any) -> float | None:
-    """Coerce a timestamp or score to a finite float without raising."""
+def _collect_segments_with_fallback(audio: np.ndarray, language: str | None, effective_timeout: float) -> tuple[list[Any], Any]:
+    """Run Whisper inference and materialize segments, falling back to CPU once on CUDA runtime faults."""
+    def _run_once() -> tuple[list[Any], Any]:
+        segments_iter, info = model().transcribe(
+            audio,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+        )
+        collected: list[Any] = []
+        started = time.time()
+        for seg in segments_iter:
+            if effective_timeout and (time.time() - started) > effective_timeout:
+                raise RuntimeError(f"Whisper transcription timed out after {int(effective_timeout)}s")
+            collected.append(seg)
+        return collected, info
+
     try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return number if math.isfinite(number) else None
+        return _run_once()
+    except RuntimeError as inference_error:
+        # ctranslate2 can construct the model on CUDA when CUDA is visible but
+        # only part of the runtime (cublas/cudnn) is installed, and then fail lazily
+        # on the first inference or segment iteration. Rebuild on CPU once.
+        if _looks_like_cuda_failure(inference_error) and _model_device_hint() != "cpu":
+            _reload_on_cpu(reason=str(inference_error))
+            return _run_once()
+        raise
 
 
 def transcribe(path: str, language: str | None = None, timeout: float | None = None) -> dict:
@@ -244,27 +366,7 @@ def transcribe(path: str, language: str | None = None, timeout: float | None = N
     # `av.open`, which the installed PyAV no longer accepts, so every
     # transcription request failed with TypeError before any audio was read.
     audio = path if isinstance(path, np.ndarray) else decode_audio(path)
-    try:
-        segments, info = model().transcribe(
-            audio,
-            language=language,
-            word_timestamps=True,
-            vad_filter=True,
-        )
-    except RuntimeError as inference_error:
-        # ctranslate2 can construct the model on CUDA when CUDA is visible but
-        # only part of the runtime (cublas/cudnn) is installed, and then fail on
-        # the first inference. One bounded rebuild on CPU preserves the request.
-        if _looks_like_cuda_failure(inference_error) and _model_device_hint() != "cpu":
-            _reload_on_cpu()
-            segments, info = model().transcribe(
-                audio,
-                language=language,
-                word_timestamps=True,
-                vad_filter=True,
-            )
-        else:
-            raise
+    segments, info = _collect_segments_with_fallback(audio, language, effective_timeout)
     duration = _finite(getattr(info, "duration", None))
     # Timestamps cannot describe moments outside the decoded media; clamping
     # keeps malformed Whisper output from creating out-of-range candidates.

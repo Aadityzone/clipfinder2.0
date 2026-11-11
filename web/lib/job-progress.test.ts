@@ -275,3 +275,98 @@ test("formatTimeOnly formats ISO string cleanly", () => {
   const formatted = formatTimeOnly(d);
   assert.ok(formatted.length >= 5);
 });
+
+test("deriveProjectProcessingState never marks READY or 100% clipProgress while renders or chunks remain queued/active", () => {
+  const now = new Date();
+  const state = deriveProjectProcessingState({
+    id: "proj_progressive_1",
+    createdAt: new Date(now.getTime() - 90_000),
+    updatedAt: now,
+    source: {
+      id: "src_prog",
+      type: "YOUTUBE",
+      media: [{ id: "med_prog", durationS: 1800, hasAudio: true, createdAt: new Date(now.getTime() - 80_000) }],
+    },
+    jobs: [
+      {
+        id: "j_render_2",
+        type: "RENDER",
+        status: "QUEUED",
+        progress: 0,
+        attempts: 0,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "j_render_1",
+        type: "RENDER",
+        status: "READY",
+        progress: 1,
+        attempts: 1,
+        createdAt: new Date(now.getTime() - 20_000),
+        finishedAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "j_transcribe_2",
+        type: "TRANSCRIBE",
+        status: "TRANSCRIBING",
+        progress: 0.3,
+        attempts: 1,
+        payload: { chunkIndex: 1, totalChunks: 4, continueAfterRange: true },
+        startedAt: new Date(now.getTime() - 10_000),
+        createdAt: new Date(now.getTime() - 15_000),
+        updatedAt: now,
+      },
+      {
+        id: "j_analyze_1",
+        type: "ANALYZE",
+        status: "READY",
+        progress: 1,
+        attempts: 1,
+        payload: { chunkIndex: 0, totalChunks: 4 },
+        createdAt: new Date(now.getTime() - 40_000),
+        finishedAt: new Date(now.getTime() - 20_000),
+        updatedAt: now,
+      },
+      {
+        id: "j_transcribe_1",
+        type: "TRANSCRIBE",
+        status: "READY",
+        progress: 1,
+        attempts: 1,
+        payload: { chunkIndex: 0, totalChunks: 4 },
+        createdAt: new Date(now.getTime() - 60_000),
+        finishedAt: new Date(now.getTime() - 45_000),
+        updatedAt: now,
+      },
+      {
+        id: "j_ingest_1",
+        type: "INGEST",
+        status: "READY",
+        progress: 1,
+        attempts: 1,
+        createdAt: new Date(now.getTime() - 85_000),
+        finishedAt: new Date(now.getTime() - 70_000),
+        updatedAt: now,
+      },
+    ],
+    clips: [
+      { id: "c1", status: "READY", score: 94, createdAt: new Date(now.getTime() - 25_000) },
+      { id: "c2", status: "CANDIDATE", score: 88, createdAt: new Date(now.getTime() - 25_000) },
+    ],
+    analyses: [{ id: "a1", createdAt: new Date(now.getTime() - 25_000) }],
+  });
+
+  assert.equal(state.status, "PROCESSING");
+  assert.equal(state.isTerminal, false);
+  assert.ok(state.clipProgress < 100, `Expected partial clipProgress < 100, got ${state.clipProgress}`);
+  assert.ok(state.aiProgress > 0 && state.aiProgress < 100);
+  assert.ok((state.overallProgress ?? 0) < 100);
+  assert.equal(state.completedClips, 1);
+  assert.equal(state.renderedClips, 1);
+  assert.equal(state.transcribeChunksCompleted, 1);
+  assert.equal(state.totalTranscribeChunks, 4);
+  assert.equal(state.analysisChunksCompleted, 1);
+  assert.equal(state.queuedRenders, 1);
+});

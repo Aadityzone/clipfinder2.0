@@ -1,3 +1,4 @@
+import concurrent.futures
 import math
 import os
 import re
@@ -131,19 +132,28 @@ def _isolate(producer, fallback):
 
 
 def analyze_media(path: str, transcript_segments: list[dict] | None = None) -> dict:
-    """Collect multimodal evidence, isolating every optional signal.
+    """Collect multimodal evidence in parallel, isolating every optional signal.
 
     Audio, scene detection, faces, visual sampling and OCR may each be unavailable
     on a given host (missing native library, no OCR binary, unreadable stream).
     One failing signal must not fail the whole analysis: each block is collected
-    independently and an absent block is simply omitted rather than being treated
-    as negative evidence for that modality.
+    independently via bounded worker threads and an absent block is omitted rather
+    than being treated as negative evidence for that modality.
     """
-    audio, windows = _isolate(lambda: audio_features(path), ({}, []))
-    scenes = _isolate(lambda: scene_features(path), {})
-    vision = _isolate(lambda: face_features(path), {})
-    on_screen = _isolate(lambda: analyze_on_screen(path), {})
-    frames = _isolate(lambda: extract_sampled_frames(path), {})
+    max_workers = max(1, min(5, int(os.getenv("MEDIA_ANALYSIS_WORKERS", "3"))))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        audio_fut = pool.submit(_isolate, lambda: audio_features(path), ({}, []))
+        scenes_fut = pool.submit(_isolate, lambda: scene_features(path), {})
+        vision_fut = pool.submit(_isolate, lambda: face_features(path), {})
+        screen_fut = pool.submit(_isolate, lambda: analyze_on_screen(path), {})
+        frames_fut = pool.submit(_isolate, lambda: extract_sampled_frames(path), {})
+
+        audio, windows = audio_fut.result()
+        scenes = scenes_fut.result()
+        vision = vision_fut.result()
+        on_screen = screen_fut.result()
+        frames = frames_fut.result()
+
     visual = {
         "available": bool(frames.get("available") and frames.get("visualSamples")),
         "durationS": frames.get("durationS"),

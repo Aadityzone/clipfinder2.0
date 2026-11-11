@@ -19,6 +19,11 @@ export async function recordWorkerProgress(
     activityMessage?: string;
     candidatesFound?: number;
     completedClips?: number;
+    transcribeChunksCompleted?: number;
+    totalTranscribeChunks?: number;
+    analysisChunksCompleted?: number;
+    queuedRenders?: number;
+    renderedClips?: number;
   },
   client?: any
 ) {
@@ -64,6 +69,14 @@ export async function recordWorkerProgress(
     lastCheckpoint: update.lastCheckpoint || existingState.lastCheckpoint,
     candidatesFound: update.candidatesFound ?? existingState.candidatesFound,
     completedClips: update.completedClips ?? existingState.completedClips,
+    transcribeChunksCompleted:
+      update.transcribeChunksCompleted ?? existingState.transcribeChunksCompleted,
+    totalTranscribeChunks:
+      update.totalTranscribeChunks ?? existingState.totalTranscribeChunks,
+    analysisChunksCompleted:
+      update.analysisChunksCompleted ?? existingState.analysisChunksCompleted,
+    queuedRenders: update.queuedRenders ?? existingState.queuedRenders,
+    renderedClips: update.renderedClips ?? existingState.renderedClips,
   };
 
   await dbClient.job.update({

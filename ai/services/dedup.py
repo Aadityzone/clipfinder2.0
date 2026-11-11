@@ -69,6 +69,10 @@ def _overlap_ratio(a: dict, b: dict) -> float:
     return intersection / shortest if shortest > 0 else 0.0
 
 
+overlap_ratio = _overlap_ratio
+iou = _iou
+
+
 def _clamp_unit(value: Any, fallback: float) -> float:
     number = _finite(value)
     if number is None:

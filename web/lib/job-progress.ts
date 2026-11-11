@@ -69,15 +69,62 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
   const media = project.source?.media?.[0] || null;
   const sourceDurationS = Number(media?.durationS || 0);
 
-  // Identify jobs by type
-  const ingestJob = jobs.find((j) => j.type === "INGEST");
-  const transcribeJob = jobs.find((j) => j.type === "TRANSCRIBE");
-  const analyzeJob = jobs.find((j) => j.type === "ANALYZE" || j.type === "LONGFORM_ANALYZE");
+  const RUNNING_STATUSES = [
+    "RETRYING",
+    "DOWNLOADING",
+    "INGESTING",
+    "TRANSCRIBING",
+    "ANALYZING",
+    "EDITING",
+    "RENDERING",
+  ];
+  const QUEUED_OR_ACTIVE = ["QUEUED", ...RUNNING_STATUSES];
 
-  // Determine current active or latest job
-  const activeJob = jobs.find((j) =>
-    ["QUEUED", "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"].includes(j.status)
-  ) || jobs[0] || null;
+  // Identify jobs by type (jobs are ordered newest-first by callers)
+  const ingestJob = jobs.find((j) => j.type === "INGEST");
+  const transcribeJobs = jobs.filter((j) => j.type === "TRANSCRIBE");
+  const analysisJobs = jobs.filter((j) => j.type === "ANALYZE" || j.type === "LONGFORM_ANALYZE");
+  const renderJobs = jobs.filter((j) => j.type === "RENDER");
+  const transcribeJob = transcribeJobs[0];
+  const analyzeJob = analysisJobs[0];
+
+  const runningJobs = jobs.filter((j) => RUNNING_STATUSES.includes(j.status));
+  const activeJobs = jobs.filter((j) => QUEUED_OR_ACTIVE.includes(j.status));
+  const hasActiveJobs = activeJobs.length > 0;
+
+  // Prefer actively running jobs over queued siblings so stage diagnosis reflects real live work
+  const activeJob = runningJobs[0] || activeJobs[0] || jobs[0] || null;
+
+  const transcribeChunksCompleted = transcribeJobs.filter((j) => j.status === "READY").length;
+  const analysisChunksCompleted = analysisJobs.filter((j) => j.status === "READY").length;
+  const queuedRenders = renderJobs.filter((j) => QUEUED_OR_ACTIVE.includes(j.status)).length;
+  const readyRenders = renderJobs.filter((j) => j.status === "READY").length;
+
+  let maxPlannedChunks = transcribeJobs.length;
+  let hasMoreTranscribePending = false;
+  for (const job of jobs) {
+    const p =
+      job.payload && typeof job.payload === "object"
+        ? (job.payload as Record<string, unknown>)
+        : null;
+    if (!p) continue;
+    const planned = Number(p.totalChunks);
+    if (Number.isFinite(planned) && planned > maxPlannedChunks) {
+      maxPlannedChunks = Math.floor(planned);
+    }
+    if (p.continueAfterRange === true && job.status !== "READY") {
+      hasMoreTranscribePending = true;
+    }
+  }
+  if (hasMoreTranscribePending && maxPlannedChunks <= transcribeChunksCompleted) {
+    maxPlannedChunks = transcribeChunksCompleted + 1;
+  }
+  const totalTranscribeChunks = maxPlannedChunks;
+  const aiJobsRemaining = jobs.filter(
+    (j) =>
+      ["INGEST", "TRANSCRIBE", "ANALYZE", "LONGFORM_ANALYZE"].includes(j.type) &&
+      QUEUED_OR_ACTIVE.includes(j.status)
+  ).length;
 
   const now = Date.now();
   const startTime = activeJob?.startedAt
@@ -105,14 +152,33 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
 
   const heartbeatAgeMs = lastHeartbeat ? Math.max(0, now - lastHeartbeat.getTime()) : undefined;
 
-  // These rings report verified milestones, not estimated percentages. The worker's
-  // stage progress is not a measured byte/frame/model fraction, so intermediate
-  // percentages would imply precision the backend does not currently provide.
+  // These rings report verified milestones, not estimated percentages.
   const sourceProgress = media?.id || ingestJob?.status === "READY" ? 100 : 0;
   const candidatesFound = clips.length;
   const completedClips = clips.filter((c) => c.status === "READY").length;
-  let aiProgress = candidatesFound > 0 || analyzeJob?.status === "READY" ? 100 : 0;
-  let clipProgress = analyzeJob?.status === "READY" || candidatesFound > 0 ? 100 : 0;
+  const renderedClips = completedClips;
+
+  let aiProgress = 0;
+  if (!hasActiveJobs && (analyzeJob?.status === "READY" || clips.length > 0)) {
+    aiProgress = 100;
+  } else if (aiJobsRemaining === 0 && (candidatesFound > 0 || analysisChunksCompleted > 0)) {
+    aiProgress = 100;
+  } else if (totalTranscribeChunks > 1 && (transcribeChunksCompleted > 0 || analysisChunksCompleted > 0)) {
+    aiProgress = Math.min(
+      99,
+      Math.round(((transcribeChunksCompleted + analysisChunksCompleted) / (totalTranscribeChunks * 2)) * 100)
+    );
+  }
+
+  let clipProgress = 0;
+  if (!hasActiveJobs && (analyzeJob?.status === "READY" || clips.length > 0)) {
+    clipProgress = 100;
+  } else if (renderJobs.length > 0 && (completedClips > 0 || readyRenders > 0)) {
+    const doneRenders = Math.max(completedClips, readyRenders);
+    const denominator = Math.max(doneRenders, renderJobs.length) + (aiJobsRemaining > 0 ? 1 : 0);
+    clipProgress = Math.min(99, Math.round((doneRenders / denominator) * 100));
+  }
+
   let overallProgress: number | null = null;
 
   // 4. Determine Worker Status & Queued / Stalled Diagnosis
@@ -123,7 +189,7 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
   let canRetry = false;
   let isTerminal = false;
 
-  if (clips.length > 0 && (!activeJob || activeJob.status === "READY")) {
+  if (!hasActiveJobs && clips.length > 0 && (!activeJob || activeJob.status === "READY")) {
     status = "READY";
     diagnosis = "All processing complete.";
     diagnosisSubtext = `${candidatesFound} candidate clips ready for preview and editing.`;
@@ -131,7 +197,7 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
     isTerminal = true;
     aiProgress = 100;
     clipProgress = 100;
-  } else if (activeJob?.status === "READY") {
+  } else if (!hasActiveJobs && activeJob?.status === "READY") {
     // An analysis can finish successfully without finding a qualifying moment.
     // Report completion honestly instead of treating READY as active processing.
     status = "READY";
@@ -195,7 +261,19 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
     }
   }
 
-  if (status === "READY") overallProgress = 100;
+  if (status === "READY") {
+    overallProgress = 100;
+  } else if (
+    hasActiveJobs &&
+    (totalTranscribeChunks > 1 || renderJobs.length > 0) &&
+    (transcribeChunksCompleted > 0 || analysisChunksCompleted > 0 || readyRenders > 0 || completedClips > 0)
+  ) {
+    const weighted = Math.round(sourceProgress * 0.2 + aiProgress * 0.45 + clipProgress * 0.35);
+    overallProgress = Math.min(99, Math.max(1, weighted));
+    if (completedClips > 0 && !diagnosisSubtext.includes("playable")) {
+      diagnosisSubtext = `${completedClips} playable clip${completedClips === 1 ? "" : "s"} ready now; background processing continues.`;
+    }
+  }
 
   // 5. Build Stage Label
   let stage = activeJob?.status || "QUEUED";
@@ -351,6 +429,11 @@ export function deriveProjectProcessingState(project: ProjectProcessingInput): P
     candidatesFound,
     completedClips,
     totalClips: candidatesFound,
+    transcribeChunksCompleted,
+    totalTranscribeChunks,
+    analysisChunksCompleted,
+    queuedRenders,
+    renderedClips,
     activity,
     technicalDetails,
     isTerminal,

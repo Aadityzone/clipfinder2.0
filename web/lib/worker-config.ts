@@ -11,6 +11,63 @@
 /** Maximum source seconds processed per transcription chunk. */
 export const MAX_SOURCE_CHUNK_SECONDS = 3600;
 
+function readBoundedInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+/**
+ * Default progressive chunk size in seconds for streaming long-form sources.
+ * Keeps early transcript + candidate discovery fast while bounding memory usage.
+ */
+export const PROGRESSIVE_CHUNK_SECONDS = readBoundedInt(
+  process.env.PROGRESSIVE_CHUNK_SECONDS,
+  300,
+  30,
+  MAX_SOURCE_CHUNK_SECONDS
+);
+
+/**
+ * Top highest-scoring candidates dispatched immediately at high priority so the
+ * user receives initial playable clips as early as possible.
+ */
+export const PRIORITY_RENDER_TOP_N = readBoundedInt(
+  process.env.PRIORITY_RENDER_TOP_N,
+  3,
+  1,
+  10
+);
+
+/** Maximum number of discovered candidates auto-queued for background rendering. */
+export const AUTO_RENDER_LIMIT = readBoundedInt(
+  process.env.AUTO_RENDER_LIMIT,
+  8,
+  PRIORITY_RENDER_TOP_N,
+  20
+);
+
+/** Prior transcript context (seconds) included across chunk boundaries during analysis. */
+export const LOOKBACK_CONTEXT_SECONDS = readBoundedInt(
+  process.env.LOOKBACK_CONTEXT_SECONDS,
+  60,
+  0,
+  300
+);
+
+/** Bounded worker concurrency across independent stages (1..4). */
+export const WORKER_CONCURRENCY = readBoundedInt(
+  process.env.WORKER_CONCURRENCY,
+  2,
+  1,
+  4
+);
+
 /**
  * Per-stage timeout ceilings (milliseconds). Each covers the longest realistic
  * processing time including network transfer and model inference.

@@ -21,7 +21,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         },
         jobs: {
           orderBy: { createdAt: "desc" },
-          take: 12,
+          take: 100,
         },
         clips: {
           orderBy: { score: "desc" },

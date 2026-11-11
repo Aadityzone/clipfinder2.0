@@ -60,6 +60,11 @@ export interface JobProgressState {
   candidatesFound?: number;
   completedClips?: number;
   totalClips?: number;
+  transcribeChunksCompleted?: number;
+  totalTranscribeChunks?: number;
+  analysisChunksCompleted?: number;
+  queuedRenders?: number;
+  renderedClips?: number;
   sourceDurationS?: number;
   lastCheckpoint?: string;
   error?: string;
@@ -93,6 +98,11 @@ export interface ProjectProcessingState {
   candidatesFound: number;
   completedClips: number;
   totalClips: number;
+  transcribeChunksCompleted?: number;
+  totalTranscribeChunks?: number;
+  analysisChunksCompleted?: number;
+  queuedRenders?: number;
+  renderedClips?: number;
   activity: ActivityEvent[];
   technicalDetails: TechnicalDetails;
   isTerminal: boolean;

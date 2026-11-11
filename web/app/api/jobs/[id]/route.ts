@@ -1,7 +1,6 @@
 import { requireUser } from "../../../../lib/auth";
 import { db } from "../../../../lib/db";
-
-const CANCELLABLE = ["QUEUED", "RETRYING", "DOWNLOADING", "INGESTING", "TRANSCRIBING", "ANALYZING", "EDITING", "RENDERING"] as const;
+import { cancelProjectJobs } from "../../../../lib/jobs";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -27,12 +26,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!job) return Response.json({ error: "Not found" }, { status: 404 });
 
     if (body.action === "cancel") {
-      const changed = await db.job.updateMany({
-        where: { id, userId: user.id, status: { in: [...CANCELLABLE] } },
-        data: { status: "CANCELLED", finishedAt: new Date(), runAfter: null },
+      const cancelledCount = await cancelProjectJobs({
+        jobId: id,
+        userId: user.id,
+        projectId: job.projectId,
       });
       const updated = await db.job.findUnique({ where: { id } });
-      if (!changed.count) {
+      if (!cancelledCount) {
         return Response.json({ error: "Job is no longer cancellable", job: updated }, { status: 409 });
       }
       return Response.json(updated);
